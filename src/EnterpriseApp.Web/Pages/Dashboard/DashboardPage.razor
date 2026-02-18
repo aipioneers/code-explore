@@ -1,0 +1,282 @@
+@page "/"
+@page "/dashboard"
+@attribute [Authorize]
+@inject HttpClientService Http
+
+<PageTitle>Dashboard - EnterpriseApp</PageTitle>
+
+<h1 class="mb-4">Dashboard</h1>
+
+@if (_isLoading)
+{
+    <div class="text-center py-5">
+        <div class="spinner-border text-primary" role="status">
+            <span class="visually-hidden">Loading...</span>
+        </div>
+    </div>
+}
+else
+{
+    <div class="row g-4 mb-4">
+        <!-- Sales Widget -->
+        <div class="col-md-6 col-xl-3">
+            <div class="widget">
+                <div class="widget-title">Total Sales Today</div>
+                <div class="widget-value">@_dashboard?.Sales.TotalSalesToday.ToString("C")</div>
+                <div class="text-muted small">
+                    @if (_dashboard?.Sales.GrowthPercentage >= 0)
+                    {
+                        <span class="text-success">+@_dashboard.Sales.GrowthPercentage.ToString("F1")%</span>
+                    }
+                    else
+                    {
+                        <span class="text-danger">@_dashboard?.Sales.GrowthPercentage.ToString("F1")%</span>
+                    }
+                    vs last week
+                </div>
+            </div>
+        </div>
+
+        <!-- Orders Widget -->
+        <div class="col-md-6 col-xl-3">
+            <div class="widget">
+                <div class="widget-title">Orders Today</div>
+                <div class="widget-value">@_dashboard?.Orders.TotalOrdersToday</div>
+                <div class="text-muted small">
+                    <span class="text-warning">@_dashboard?.Orders.PendingOrders pending</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Processing Orders Widget -->
+        <div class="col-md-6 col-xl-3">
+            <div class="widget">
+                <div class="widget-title">Processing</div>
+                <div class="widget-value">@_dashboard?.Orders.ProcessingOrders</div>
+                <div class="text-muted small">
+                    @_dashboard?.Orders.ShippedOrders shipped
+                </div>
+            </div>
+        </div>
+
+        <!-- Low Stock Widget -->
+        <div class="col-md-6 col-xl-3">
+            <div class="widget">
+                <div class="widget-title">Low Stock Items</div>
+                <div class="widget-value @(_dashboard?.Inventory.LowStockProducts > 0 ? "text-warning" : "")">
+                    @_dashboard?.Inventory.LowStockProducts
+                </div>
+                <div class="text-muted small">
+                    @_dashboard?.Inventory.OutOfStockProducts out of stock
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row g-4">
+        <!-- Recent Orders -->
+        <div class="col-lg-8">
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0">Recent Orders</h5>
+                    <a href="orders" class="btn btn-sm btn-outline-primary">View All</a>
+                </div>
+                <div class="card-body p-0">
+                    <div class="table-responsive">
+                        <table class="table table-hover mb-0">
+                            <thead>
+                                <tr>
+                                    <th>Order #</th>
+                                    <th>Customer</th>
+                                    <th>Amount</th>
+                                    <th>Status</th>
+                                    <th>Date</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @if (_dashboard?.Orders.RecentOrders.Any() == true)
+                                {
+                                    @foreach (var order in _dashboard.Orders.RecentOrders)
+                                    {
+                                        <tr>
+                                            <td><a href="orders/@order.Id">@order.OrderNumber</a></td>
+                                            <td>@order.CustomerName</td>
+                                            <td>@order.TotalAmount.ToString("C")</td>
+                                            <td><span class="badge bg-@GetStatusColor(order.Status)">@order.Status</span></td>
+                                            <td>@order.CreatedAt.ToString("g")</td>
+                                        </tr>
+                                    }
+                                }
+                                else
+                                {
+                                    <tr>
+                                        <td colspan="5" class="text-center text-muted py-4">No recent orders</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Notifications -->
+        <div class="col-lg-4">
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0">Notifications</h5>
+                    <a href="notifications" class="btn btn-sm btn-outline-primary">View All</a>
+                </div>
+                <div class="card-body">
+                    @if (_dashboard?.RecentNotifications.Any() == true)
+                    {
+                        @foreach (var notification in _dashboard.RecentNotifications)
+                        {
+                            <div class="notification-item @(notification.IsRead ? "" : "unread")">
+                                <div class="d-flex justify-content-between">
+                                    <strong>@notification.Title</strong>
+                                    <small class="text-muted">@GetRelativeTime(notification.CreatedAt)</small>
+                                </div>
+                                <p class="mb-0 text-muted small">@notification.Message</p>
+                            </div>
+                        }
+                    }
+                    else
+                    {
+                        <p class="text-center text-muted mb-0">No new notifications</p>
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<style>
+    .notification-item {
+        padding: 0.75rem 0;
+        border-bottom: 1px solid #eee;
+    }
+
+    .notification-item:last-child {
+        border-bottom: none;
+    }
+
+    .notification-item.unread {
+        background-color: #f8f9fa;
+        margin: 0 -1rem;
+        padding: 0.75rem 1rem;
+        border-radius: 0.25rem;
+    }
+</style>
+
+@code {
+    private DashboardDto? _dashboard;
+    private bool _isLoading = true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadDashboard();
+    }
+
+    private async Task LoadDashboard()
+    {
+        _isLoading = true;
+
+        try
+        {
+            var response = await Http.GetAsync<DashboardDto>("api/dashboard");
+
+            if (response.Success)
+            {
+                _dashboard = response.Data;
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error loading dashboard: {ex.Message}");
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+    }
+
+    private static string GetStatusColor(string status)
+    {
+        return status.ToLowerInvariant() switch
+        {
+            "pending" => "warning",
+            "confirmed" => "info",
+            "processing" => "primary",
+            "shipped" => "success",
+            "delivered" => "secondary",
+            "cancelled" => "danger",
+            _ => "secondary"
+        };
+    }
+
+    private static string GetRelativeTime(DateTime dateTime)
+    {
+        var timeSpan = DateTime.UtcNow - dateTime;
+
+        if (timeSpan.TotalMinutes < 1)
+            return "just now";
+        if (timeSpan.TotalHours < 1)
+            return $"{(int)timeSpan.TotalMinutes}m ago";
+        if (timeSpan.TotalDays < 1)
+            return $"{(int)timeSpan.TotalHours}h ago";
+        if (timeSpan.TotalDays < 7)
+            return $"{(int)timeSpan.TotalDays}d ago";
+
+        return dateTime.ToString("MMM d");
+    }
+
+    // DTO classes
+    private class DashboardDto
+    {
+        public SalesWidgetDto Sales { get; set; } = new();
+        public OrdersWidgetDto Orders { get; set; } = new();
+        public InventoryWidgetDto Inventory { get; set; } = new();
+        public List<NotificationDto> RecentNotifications { get; set; } = new();
+    }
+
+    private class SalesWidgetDto
+    {
+        public decimal TotalSalesToday { get; set; }
+        public decimal GrowthPercentage { get; set; }
+    }
+
+    private class OrdersWidgetDto
+    {
+        public int TotalOrdersToday { get; set; }
+        public int PendingOrders { get; set; }
+        public int ProcessingOrders { get; set; }
+        public int ShippedOrders { get; set; }
+        public List<RecentOrderDto> RecentOrders { get; set; } = new();
+    }
+
+    private class RecentOrderDto
+    {
+        public Guid Id { get; set; }
+        public string OrderNumber { get; set; } = string.Empty;
+        public string CustomerName { get; set; } = string.Empty;
+        public decimal TotalAmount { get; set; }
+        public string Status { get; set; } = string.Empty;
+        public DateTime CreatedAt { get; set; }
+    }
+
+    private class InventoryWidgetDto
+    {
+        public int LowStockProducts { get; set; }
+        public int OutOfStockProducts { get; set; }
+    }
+
+    private class NotificationDto
+    {
+        public Guid Id { get; set; }
+        public string Title { get; set; } = string.Empty;
+        public string Message { get; set; } = string.Empty;
+        public bool IsRead { get; set; }
+        public DateTime CreatedAt { get; set; }
+    }
+}

@@ -1,0 +1,740 @@
+@page "/orders/{Id:guid}"
+@attribute [Authorize]
+@inject HttpClientService Http
+@inject NavigationManager Navigation
+@inject IToastService ToastService
+
+<PageTitle>@(_order?.OrderNumber ?? "Order Details") - EnterpriseApp</PageTitle>
+
+@if (_isLoading)
+{
+    <div class="text-center py-5">
+        <div class="spinner-border text-primary" role="status">
+            <span class="visually-hidden">Loading...</span>
+        </div>
+    </div>
+}
+else if (_order == null)
+{
+    <div class="text-center py-5">
+        <i class="bi bi-exclamation-circle display-1 text-warning"></i>
+        <p class="text-muted mt-3">Order not found.</p>
+        <a href="orders" class="btn btn-primary">Back to Orders</a>
+    </div>
+}
+else
+{
+    <!-- Header -->
+    <div class="d-flex justify-content-between align-items-start mb-4">
+        <div>
+            <nav aria-label="breadcrumb">
+                <ol class="breadcrumb mb-2">
+                    <li class="breadcrumb-item"><a href="orders">Orders</a></li>
+                    <li class="breadcrumb-item active">@_order.OrderNumber</li>
+                </ol>
+            </nav>
+            <h1 class="mb-1">Order @_order.OrderNumber</h1>
+            <div class="text-muted">
+                <span class="badge bg-@GetStatusColor(_order.Status) me-2">@_order.Status</span>
+                <span class="badge bg-@GetPaymentStatusColor(_order.PaymentStatus) me-2">@_order.PaymentStatus</span>
+                <span>@_order.OrderDate.ToString("MMMM d, yyyy")</span>
+            </div>
+        </div>
+        <div class="btn-group">
+            @if (_order.Status == "Pending")
+            {
+                <button class="btn btn-success" @onclick="ConfirmOrder">
+                    <i class="bi bi-check-lg me-1"></i> Confirm
+                </button>
+            }
+            @if (_order.Status == "Confirmed")
+            {
+                <button class="btn btn-primary" @onclick="StartProcessing">
+                    <i class="bi bi-gear me-1"></i> Start Processing
+                </button>
+            }
+            @if (_order.Status == "Processing")
+            {
+                <button class="btn btn-info" @onclick="ShowShipModal">
+                    <i class="bi bi-truck me-1"></i> Ship
+                </button>
+            }
+            @if (_order.Status == "Shipped")
+            {
+                <button class="btn btn-secondary" @onclick="MarkDelivered">
+                    <i class="bi bi-check-circle me-1"></i> Mark Delivered
+                </button>
+            }
+            @if (_order.Status is "Pending" or "Confirmed")
+            {
+                <button class="btn btn-outline-danger" @onclick="ShowCancelModal">
+                    <i class="bi bi-x-lg me-1"></i> Cancel
+                </button>
+            }
+            @if (_order.PaymentStatus == "Pending")
+            {
+                <button class="btn btn-outline-success" @onclick="ShowPaymentModal">
+                    <i class="bi bi-credit-card me-1"></i> Record Payment
+                </button>
+            }
+        </div>
+    </div>
+
+    <div class="row g-4">
+        <!-- Main Content -->
+        <div class="col-lg-8">
+            <!-- Order Items -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="mb-0">Order Items (@_order.Items.Count)</h5>
+                </div>
+                <div class="table-responsive">
+                    <table class="table mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Product</th>
+                                <th class="text-end">Unit Price</th>
+                                <th class="text-center">Qty</th>
+                                <th class="text-end">Total</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var item in _order.Items)
+                            {
+                                <tr>
+                                    <td>
+                                        <div class="fw-medium">@item.ProductName</div>
+                                        <small class="text-muted">
+                                            <code>@item.ProductSku</code>
+                                            @if (!string.IsNullOrEmpty(item.VariantName))
+                                            {
+                                                <span> • @item.VariantName</span>
+                                            }
+                                        </small>
+                                    </td>
+                                    <td class="text-end">
+                                        @item.UnitPrice.ToString("C")
+                                        @if (item.UnitDiscount > 0)
+                                        {
+                                            <br /><small class="text-success">-@item.UnitDiscount.ToString("C") discount</small>
+                                        }
+                                    </td>
+                                    <td class="text-center">@item.Quantity</td>
+                                    <td class="text-end fw-medium">@item.LineTotalWithTax.ToString("C")</td>
+                                </tr>
+                            }
+                        </tbody>
+                        <tfoot class="table-light">
+                            <tr>
+                                <td colspan="3" class="text-end">Subtotal</td>
+                                <td class="text-end">@_order.Subtotal.ToString("C")</td>
+                            </tr>
+                            @if (_order.DiscountAmount > 0)
+                            {
+                                <tr>
+                                    <td colspan="3" class="text-end">Discount</td>
+                                    <td class="text-end text-success">-@_order.DiscountAmount.ToString("C")</td>
+                                </tr>
+                            }
+                            <tr>
+                                <td colspan="3" class="text-end">Tax</td>
+                                <td class="text-end">@_order.TaxAmount.ToString("C")</td>
+                            </tr>
+                            <tr>
+                                <td colspan="3" class="text-end">Shipping</td>
+                                <td class="text-end">@_order.ShippingAmount.ToString("C")</td>
+                            </tr>
+                            <tr class="fw-bold">
+                                <td colspan="3" class="text-end">Total</td>
+                                <td class="text-end h5 mb-0">@_order.TotalAmount.ToString("C")</td>
+                            </tr>
+                        </tfoot>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Addresses -->
+            <div class="row g-4 mb-4">
+                <div class="col-md-6">
+                    <div class="card h-100">
+                        <div class="card-header">
+                            <h6 class="mb-0">Shipping Address</h6>
+                        </div>
+                        <div class="card-body">
+                            <address class="mb-0">
+                                @_order.ShippingAddress.Street<br />
+                                @_order.ShippingAddress.City, @_order.ShippingAddress.State @_order.ShippingAddress.PostalCode<br />
+                                @_order.ShippingAddress.Country
+                            </address>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-6">
+                    <div class="card h-100">
+                        <div class="card-header">
+                            <h6 class="mb-0">Billing Address</h6>
+                        </div>
+                        <div class="card-body">
+                            <address class="mb-0">
+                                @_order.BillingAddress.Street<br />
+                                @_order.BillingAddress.City, @_order.BillingAddress.State @_order.BillingAddress.PostalCode<br />
+                                @_order.BillingAddress.Country
+                            </address>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Notes -->
+            @if (!string.IsNullOrEmpty(_order.CustomerNotes) || !string.IsNullOrEmpty(_order.Notes))
+            {
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="mb-0">Notes</h5>
+                    </div>
+                    <div class="card-body">
+                        @if (!string.IsNullOrEmpty(_order.CustomerNotes))
+                        {
+                            <div class="mb-3">
+                                <label class="text-muted small">Customer Notes</label>
+                                <p class="mb-0">@_order.CustomerNotes</p>
+                            </div>
+                        }
+                        @if (!string.IsNullOrEmpty(_order.Notes))
+                        {
+                            <div>
+                                <label class="text-muted small">Internal Notes</label>
+                                <p class="mb-0" style="white-space: pre-wrap;">@_order.Notes</p>
+                            </div>
+                        }
+                    </div>
+                </div>
+            }
+        </div>
+
+        <!-- Sidebar -->
+        <div class="col-lg-4">
+            <!-- Customer Info -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="mb-0">Customer</h5>
+                </div>
+                <div class="card-body">
+                    <div class="fw-medium">@_order.CustomerName</div>
+                    <a href="mailto:@_order.CustomerEmail">@_order.CustomerEmail</a>
+                    <div class="mt-2">
+                        <a href="customers/@_order.CustomerId" class="btn btn-sm btn-outline-primary">
+                            View Customer
+                        </a>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Shipping Info -->
+            @if (!string.IsNullOrEmpty(_order.TrackingNumber))
+            {
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h5 class="mb-0">Shipping</h5>
+                    </div>
+                    <div class="card-body">
+                        <dl class="mb-0">
+                            @if (!string.IsNullOrEmpty(_order.ShippingCarrier))
+                            {
+                                <dt class="text-muted small">Carrier</dt>
+                                <dd>@_order.ShippingCarrier</dd>
+                            }
+                            <dt class="text-muted small">Tracking Number</dt>
+                            <dd class="mb-0">
+                                <code>@_order.TrackingNumber</code>
+                            </dd>
+                        </dl>
+                    </div>
+                </div>
+            }
+
+            <!-- Payment Info -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="mb-0">Payment</h5>
+                </div>
+                <div class="card-body">
+                    <dl class="mb-0">
+                        <dt class="text-muted small">Status</dt>
+                        <dd>
+                            <span class="badge bg-@GetPaymentStatusColor(_order.PaymentStatus)">
+                                @_order.PaymentStatus
+                            </span>
+                        </dd>
+
+                        @if (!string.IsNullOrEmpty(_order.PaymentMethod))
+                        {
+                            <dt class="text-muted small">Method</dt>
+                            <dd>@_order.PaymentMethod</dd>
+                        }
+
+                        @if (!string.IsNullOrEmpty(_order.PaymentReference))
+                        {
+                            <dt class="text-muted small">Reference</dt>
+                            <dd><code>@_order.PaymentReference</code></dd>
+                        }
+
+                        @if (_order.PaidAt.HasValue)
+                        {
+                            <dt class="text-muted small">Paid At</dt>
+                            <dd class="mb-0">@_order.PaidAt.Value.ToString("F")</dd>
+                        }
+                    </dl>
+                </div>
+            </div>
+
+            <!-- Timeline -->
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="mb-0">Timeline</h5>
+                </div>
+                <div class="card-body">
+                    <dl class="mb-0">
+                        <dt class="text-muted small">Created</dt>
+                        <dd>@_order.CreatedAt.ToString("F")</dd>
+
+                        @if (_order.ModifiedAt.HasValue)
+                        {
+                            <dt class="text-muted small">Last Modified</dt>
+                            <dd>@_order.ModifiedAt.Value.ToString("F")</dd>
+                        }
+
+                        @if (_order.ExpectedDeliveryDate.HasValue)
+                        {
+                            <dt class="text-muted small">Expected Delivery</dt>
+                            <dd>@_order.ExpectedDeliveryDate.Value.ToString("d")</dd>
+                        }
+
+                        @if (_order.DeliveredAt.HasValue)
+                        {
+                            <dt class="text-muted small">Delivered At</dt>
+                            <dd class="mb-0">@_order.DeliveredAt.Value.ToString("F")</dd>
+                        }
+                    </dl>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- Ship Order Modal -->
+@if (_showShipModal)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Ship Order</h5>
+                    <button type="button" class="btn-close" @onclick="() => _showShipModal = false"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label">Tracking Number <span class="text-danger">*</span></label>
+                        <input type="text" class="form-control" @bind="_trackingNumber" />
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Carrier</label>
+                        <input type="text" class="form-control" @bind="_carrier" placeholder="e.g., FedEx, UPS, DHL" />
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" @onclick="() => _showShipModal = false">Cancel</button>
+                    <button type="button" class="btn btn-info" @onclick="ShipOrder" disabled="@(string.IsNullOrEmpty(_trackingNumber) || _isProcessing)">
+                        @if (_isProcessing)
+                        {
+                            <span class="spinner-border spinner-border-sm me-1"></span>
+                        }
+                        Ship Order
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- Cancel Order Modal -->
+@if (_showCancelModal)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Cancel Order</h5>
+                    <button type="button" class="btn-close" @onclick="() => _showCancelModal = false"></button>
+                </div>
+                <div class="modal-body">
+                    <p>Are you sure you want to cancel this order?</p>
+                    <div>
+                        <label class="form-label">Reason (optional)</label>
+                        <textarea class="form-control" @bind="_cancelReason" rows="2"></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" @onclick="() => _showCancelModal = false">Close</button>
+                    <button type="button" class="btn btn-danger" @onclick="CancelOrder" disabled="@_isProcessing">
+                        @if (_isProcessing)
+                        {
+                            <span class="spinner-border spinner-border-sm me-1"></span>
+                        }
+                        Cancel Order
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- Payment Modal -->
+@if (_showPaymentModal)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Record Payment</h5>
+                    <button type="button" class="btn-close" @onclick="() => _showPaymentModal = false"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label">Payment Method <span class="text-danger">*</span></label>
+                        <select class="form-select" @bind="_paymentMethod">
+                            <option value="">Select method...</option>
+                            <option value="Credit Card">Credit Card</option>
+                            <option value="Bank Transfer">Bank Transfer</option>
+                            <option value="PayPal">PayPal</option>
+                            <option value="Cash">Cash</option>
+                            <option value="Check">Check</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="form-label">Reference Number</label>
+                        <input type="text" class="form-control" @bind="_paymentReference" placeholder="Transaction ID, Check #, etc." />
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" @onclick="() => _showPaymentModal = false">Cancel</button>
+                    <button type="button" class="btn btn-success" @onclick="RecordPayment" disabled="@(string.IsNullOrEmpty(_paymentMethod) || _isProcessing)">
+                        @if (_isProcessing)
+                        {
+                            <span class="spinner-border spinner-border-sm me-1"></span>
+                        }
+                        Record Payment
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter]
+    public Guid Id { get; set; }
+
+    private OrderDetailDto? _order;
+    private bool _isLoading = true;
+    private bool _isProcessing = false;
+
+    // Ship modal
+    private bool _showShipModal = false;
+    private string _trackingNumber = string.Empty;
+    private string _carrier = string.Empty;
+
+    // Cancel modal
+    private bool _showCancelModal = false;
+    private string _cancelReason = string.Empty;
+
+    // Payment modal
+    private bool _showPaymentModal = false;
+    private string _paymentMethod = string.Empty;
+    private string _paymentReference = string.Empty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadOrder();
+    }
+
+    private async Task LoadOrder()
+    {
+        _isLoading = true;
+        try
+        {
+            var response = await Http.GetAsync<OrderDetailDto>($"api/orders/{Id}");
+            if (response.Success)
+            {
+                _order = response.Data;
+            }
+            else if (response.StatusCode == 404)
+            {
+                _order = null;
+            }
+            else
+            {
+                ToastService.ShowError(response.Message ?? "Failed to load order");
+            }
+        }
+        catch (Exception ex)
+        {
+            ToastService.ShowError($"Error loading order: {ex.Message}");
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+    }
+
+    private async Task ConfirmOrder()
+    {
+        _isProcessing = true;
+        try
+        {
+            var response = await Http.PostAsync<object>($"api/orders/{Id}/confirm", new { });
+            if (response.Success)
+            {
+                ToastService.ShowSuccess("Order confirmed");
+                await LoadOrder();
+            }
+            else
+            {
+                ToastService.ShowError(response.Message ?? "Failed to confirm order");
+            }
+        }
+        catch (Exception ex)
+        {
+            ToastService.ShowError($"Error: {ex.Message}");
+        }
+        finally
+        {
+            _isProcessing = false;
+        }
+    }
+
+    private async Task StartProcessing()
+    {
+        _isProcessing = true;
+        try
+        {
+            var response = await Http.PutAsync<object>($"api/orders/{Id}/status", new { status = "Processing" });
+            if (response.Success)
+            {
+                ToastService.ShowSuccess("Order is now processing");
+                await LoadOrder();
+            }
+            else
+            {
+                ToastService.ShowError(response.Message ?? "Failed to update order");
+            }
+        }
+        catch (Exception ex)
+        {
+            ToastService.ShowError($"Error: {ex.Message}");
+        }
+        finally
+        {
+            _isProcessing = false;
+        }
+    }
+
+    private void ShowShipModal()
+    {
+        _trackingNumber = string.Empty;
+        _carrier = string.Empty;
+        _showShipModal = true;
+    }
+
+    private async Task ShipOrder()
+    {
+        _isProcessing = true;
+        try
+        {
+            var response = await Http.PostAsync<object>($"api/orders/{Id}/ship", new { trackingNumber = _trackingNumber, carrier = _carrier });
+            if (response.Success)
+            {
+                ToastService.ShowSuccess("Order shipped");
+                _showShipModal = false;
+                await LoadOrder();
+            }
+            else
+            {
+                ToastService.ShowError(response.Message ?? "Failed to ship order");
+            }
+        }
+        catch (Exception ex)
+        {
+            ToastService.ShowError($"Error: {ex.Message}");
+        }
+        finally
+        {
+            _isProcessing = false;
+        }
+    }
+
+    private async Task MarkDelivered()
+    {
+        _isProcessing = true;
+        try
+        {
+            var response = await Http.PostAsync<object>($"api/orders/{Id}/deliver", new { });
+            if (response.Success)
+            {
+                ToastService.ShowSuccess("Order marked as delivered");
+                await LoadOrder();
+            }
+            else
+            {
+                ToastService.ShowError(response.Message ?? "Failed to mark order as delivered");
+            }
+        }
+        catch (Exception ex)
+        {
+            ToastService.ShowError($"Error: {ex.Message}");
+        }
+        finally
+        {
+            _isProcessing = false;
+        }
+    }
+
+    private void ShowCancelModal()
+    {
+        _cancelReason = string.Empty;
+        _showCancelModal = true;
+    }
+
+    private async Task CancelOrder()
+    {
+        _isProcessing = true;
+        try
+        {
+            var response = await Http.PostAsync<object>($"api/orders/{Id}/cancel", new { reason = _cancelReason });
+            if (response.Success)
+            {
+                ToastService.ShowSuccess("Order cancelled");
+                _showCancelModal = false;
+                await LoadOrder();
+            }
+            else
+            {
+                ToastService.ShowError(response.Message ?? "Failed to cancel order");
+            }
+        }
+        catch (Exception ex)
+        {
+            ToastService.ShowError($"Error: {ex.Message}");
+        }
+        finally
+        {
+            _isProcessing = false;
+        }
+    }
+
+    private void ShowPaymentModal()
+    {
+        _paymentMethod = string.Empty;
+        _paymentReference = string.Empty;
+        _showPaymentModal = true;
+    }
+
+    private async Task RecordPayment()
+    {
+        _isProcessing = true;
+        try
+        {
+            var response = await Http.PostAsync<object>($"api/orders/{Id}/payment", new { method = _paymentMethod, reference = _paymentReference });
+            if (response.Success)
+            {
+                ToastService.ShowSuccess("Payment recorded");
+                _showPaymentModal = false;
+                await LoadOrder();
+            }
+            else
+            {
+                ToastService.ShowError(response.Message ?? "Failed to record payment");
+            }
+        }
+        catch (Exception ex)
+        {
+            ToastService.ShowError($"Error: {ex.Message}");
+        }
+        finally
+        {
+            _isProcessing = false;
+        }
+    }
+
+    private static string GetStatusColor(string status) => status switch
+    {
+        "Pending" => "warning",
+        "Confirmed" => "info",
+        "Processing" => "primary",
+        "Shipped" => "success",
+        "Delivered" => "secondary",
+        "Cancelled" => "danger",
+        _ => "secondary"
+    };
+
+    private static string GetPaymentStatusColor(string status) => status switch
+    {
+        "Pending" => "warning",
+        "Paid" => "success",
+        "Failed" => "danger",
+        "Refunded" => "info",
+        _ => "secondary"
+    };
+
+    // DTO classes
+    private class OrderDetailDto
+    {
+        public Guid Id { get; set; }
+        public string OrderNumber { get; set; } = string.Empty;
+        public Guid CustomerId { get; set; }
+        public string CustomerName { get; set; } = string.Empty;
+        public string CustomerEmail { get; set; } = string.Empty;
+        public string Status { get; set; } = string.Empty;
+        public string PaymentStatus { get; set; } = string.Empty;
+        public DateTime OrderDate { get; set; }
+        public DateTime? ExpectedDeliveryDate { get; set; }
+        public DateTime? DeliveredAt { get; set; }
+        public decimal Subtotal { get; set; }
+        public decimal DiscountAmount { get; set; }
+        public decimal TaxAmount { get; set; }
+        public decimal ShippingAmount { get; set; }
+        public decimal TotalAmount { get; set; }
+        public string? PaymentMethod { get; set; }
+        public string? PaymentReference { get; set; }
+        public DateTime? PaidAt { get; set; }
+        public AddressDto ShippingAddress { get; set; } = new();
+        public AddressDto BillingAddress { get; set; } = new();
+        public string? Notes { get; set; }
+        public string? CustomerNotes { get; set; }
+        public string? TrackingNumber { get; set; }
+        public string? ShippingCarrier { get; set; }
+        public DateTime CreatedAt { get; set; }
+        public DateTime? ModifiedAt { get; set; }
+        public IReadOnlyList<OrderItemDto> Items { get; set; } = Array.Empty<OrderItemDto>();
+    }
+
+    private class AddressDto
+    {
+        public string Street { get; set; } = string.Empty;
+        public string City { get; set; } = string.Empty;
+        public string? State { get; set; }
+        public string PostalCode { get; set; } = string.Empty;
+        public string Country { get; set; } = string.Empty;
+    }
+
+    private class OrderItemDto
+    {
+        public string ProductName { get; set; } = string.Empty;
+        public string ProductSku { get; set; } = string.Empty;
+        public string? VariantName { get; set; }
+        public decimal UnitPrice { get; set; }
+        public int Quantity { get; set; }
+        public decimal UnitDiscount { get; set; }
+        public decimal LineTotalWithTax { get; set; }
+    }
+}

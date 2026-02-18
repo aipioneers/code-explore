@@ -1,0 +1,454 @@
+@page "/orders"
+@attribute [Authorize]
+@inject HttpClientService Http
+@inject NavigationManager Navigation
+@inject IToastService ToastService
+
+<PageTitle>Orders - EnterpriseApp</PageTitle>
+
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h1>Orders</h1>
+    <a href="orders/new" class="btn btn-primary">
+        <i class="bi bi-plus-lg me-1"></i> New Order
+    </a>
+</div>
+
+<!-- Search and Filters -->
+<div class="card mb-4">
+    <div class="card-body">
+        <div class="row g-3">
+            <div class="col-md-3">
+                <div class="input-group">
+                    <span class="input-group-text"><i class="bi bi-search"></i></span>
+                    <input type="text" class="form-control" placeholder="Search orders..."
+                           @bind="_searchTerm" @bind:event="oninput" @onkeyup="OnSearchKeyUp" />
+                </div>
+            </div>
+            <div class="col-md-2">
+                <select class="form-select" @bind="_statusFilter" @bind:after="LoadOrders">
+                    <option value="">All Statuses</option>
+                    <option value="Pending">Pending</option>
+                    <option value="Confirmed">Confirmed</option>
+                    <option value="Processing">Processing</option>
+                    <option value="Shipped">Shipped</option>
+                    <option value="Delivered">Delivered</option>
+                    <option value="Cancelled">Cancelled</option>
+                </select>
+            </div>
+            <div class="col-md-2">
+                <select class="form-select" @bind="_paymentFilter" @bind:after="LoadOrders">
+                    <option value="">All Payments</option>
+                    <option value="Pending">Pending</option>
+                    <option value="Paid">Paid</option>
+                    <option value="Failed">Failed</option>
+                    <option value="Refunded">Refunded</option>
+                </select>
+            </div>
+            <div class="col-md-2">
+                <input type="date" class="form-control" @bind="_fromDate" @bind:after="LoadOrders" />
+            </div>
+            <div class="col-md-2">
+                <input type="date" class="form-control" @bind="_toDate" @bind:after="LoadOrders" />
+            </div>
+            <div class="col-md-1">
+                <button class="btn btn-outline-secondary w-100" @onclick="ClearFilters" title="Clear filters">
+                    <i class="bi bi-x-circle"></i>
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+@if (_isLoading)
+{
+    <div class="text-center py-5">
+        <div class="spinner-border text-primary" role="status">
+            <span class="visually-hidden">Loading...</span>
+        </div>
+    </div>
+}
+else if (_orders?.Items.Any() != true)
+{
+    <div class="text-center py-5">
+        <i class="bi bi-cart display-1 text-muted"></i>
+        <p class="text-muted mt-3">
+            @if (!string.IsNullOrEmpty(_searchTerm) || !string.IsNullOrEmpty(_statusFilter))
+            {
+                <text>No orders match your search criteria.</text>
+            }
+            else
+            {
+                <text>No orders yet. Create your first order!</text>
+            }
+        </p>
+    </div>
+}
+else
+{
+    <div class="card">
+        <div class="table-responsive">
+            <table class="table table-hover mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th>Order #</th>
+                        <th>Customer</th>
+                        <th>Date</th>
+                        <th>Items</th>
+                        <th class="text-end">Total</th>
+                        <th>Status</th>
+                        <th>Payment</th>
+                        <th class="text-end">Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var order in _orders.Items)
+                    {
+                        <tr class="cursor-pointer" @onclick="() => ViewOrder(order.Id)">
+                            <td>
+                                <code>@order.OrderNumber</code>
+                            </td>
+                            <td>@order.CustomerName</td>
+                            <td>
+                                <span title="@order.OrderDate.ToString("F")">
+                                    @order.OrderDate.ToString("MMM d, yyyy")
+                                </span>
+                            </td>
+                            <td>
+                                <span class="badge bg-light text-dark">@order.ItemCount items</span>
+                            </td>
+                            <td class="text-end fw-medium">
+                                @order.TotalAmount.ToString("C")
+                            </td>
+                            <td>
+                                <span class="badge bg-@GetStatusColor(order.Status)">
+                                    @order.Status
+                                </span>
+                            </td>
+                            <td>
+                                <span class="badge bg-@GetPaymentStatusColor(order.PaymentStatus)">
+                                    @order.PaymentStatus
+                                </span>
+                            </td>
+                            <td class="text-end" @onclick:stopPropagation="true">
+                                <div class="btn-group btn-group-sm">
+                                    <a href="orders/@order.Id" class="btn btn-outline-primary" title="View">
+                                        <i class="bi bi-eye"></i>
+                                    </a>
+                                    @if (order.Status == "Pending")
+                                    {
+                                        <button class="btn btn-outline-success" title="Confirm" @onclick="() => ConfirmOrder(order)">
+                                            <i class="bi bi-check-lg"></i>
+                                        </button>
+                                    }
+                                    @if (order.Status is "Pending" or "Confirmed")
+                                    {
+                                        <button class="btn btn-outline-danger" title="Cancel" @onclick="() => ShowCancelModal(order)">
+                                            <i class="bi bi-x-lg"></i>
+                                        </button>
+                                    }
+                                </div>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Pagination -->
+    @if (_orders.TotalPages > 1)
+    {
+        <nav class="mt-4" aria-label="Order pagination">
+            <div class="d-flex justify-content-between align-items-center">
+                <div class="text-muted">
+                    Showing @((_pageNumber - 1) * _pageSize + 1) to
+                    @Math.Min(_pageNumber * _pageSize, _orders.TotalCount) of
+                    @_orders.TotalCount orders
+                </div>
+                <ul class="pagination mb-0">
+                    <li class="page-item @(!_orders.HasPreviousPage ? "disabled" : "")">
+                        <button class="page-link" @onclick="() => GoToPage(_pageNumber - 1)">
+                            <i class="bi bi-chevron-left"></i>
+                        </button>
+                    </li>
+                    @for (int i = GetStartPage(); i <= GetEndPage(); i++)
+                    {
+                        var pageNum = i;
+                        <li class="page-item @(pageNum == _pageNumber ? "active" : "")">
+                            <button class="page-link" @onclick="() => GoToPage(pageNum)">
+                                @pageNum
+                            </button>
+                        </li>
+                    }
+                    <li class="page-item @(!_orders.HasNextPage ? "disabled" : "")">
+                        <button class="page-link" @onclick="() => GoToPage(_pageNumber + 1)">
+                            <i class="bi bi-chevron-right"></i>
+                        </button>
+                    </li>
+                </ul>
+            </div>
+        </nav>
+    }
+}
+
+<!-- Cancel Order Modal -->
+@if (_orderToCancel != null)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Cancel Order</h5>
+                    <button type="button" class="btn-close" @onclick="HideCancelModal"></button>
+                </div>
+                <div class="modal-body">
+                    <p>Are you sure you want to cancel order <strong>@_orderToCancel.OrderNumber</strong>?</p>
+                    <div class="mb-3">
+                        <label class="form-label">Reason (optional)</label>
+                        <textarea class="form-control" @bind="_cancelReason" rows="2"></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" @onclick="HideCancelModal">Close</button>
+                    <button type="button" class="btn btn-danger" @onclick="CancelOrder" disabled="@_isCancelling">
+                        @if (_isCancelling)
+                        {
+                            <span class="spinner-border spinner-border-sm me-1"></span>
+                        }
+                        Cancel Order
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<style>
+    .cursor-pointer { cursor: pointer; }
+    .cursor-pointer:hover { background-color: var(--bs-table-hover-bg); }
+</style>
+
+@code {
+    private PaginatedResponse<OrderDto>? _orders;
+    private bool _isLoading = true;
+    private string _searchTerm = string.Empty;
+    private string _statusFilter = string.Empty;
+    private string _paymentFilter = string.Empty;
+    private DateTime? _fromDate;
+    private DateTime? _toDate;
+    private int _pageNumber = 1;
+    private int _pageSize = 10;
+    private OrderDto? _orderToCancel;
+    private string _cancelReason = string.Empty;
+    private bool _isCancelling = false;
+    private System.Timers.Timer? _searchDebounceTimer;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadOrders();
+    }
+
+    private async Task LoadOrders()
+    {
+        _isLoading = true;
+        StateHasChanged();
+
+        try
+        {
+            var url = $"api/orders?pageNumber={_pageNumber}&pageSize={_pageSize}";
+
+            if (!string.IsNullOrWhiteSpace(_searchTerm))
+                url += $"&search={Uri.EscapeDataString(_searchTerm)}";
+
+            if (!string.IsNullOrWhiteSpace(_statusFilter))
+                url += $"&status={_statusFilter}";
+
+            if (!string.IsNullOrWhiteSpace(_paymentFilter))
+                url += $"&paymentStatus={_paymentFilter}";
+
+            if (_fromDate.HasValue)
+                url += $"&fromDate={_fromDate.Value:yyyy-MM-dd}";
+
+            if (_toDate.HasValue)
+                url += $"&toDate={_toDate.Value:yyyy-MM-dd}";
+
+            var response = await Http.GetAsync<PaginatedResponse<OrderDto>>(url);
+
+            if (response.Success && response.Data != null)
+            {
+                _orders = response.Data;
+            }
+            else
+            {
+                ToastService.ShowError(response.Message ?? "Failed to load orders");
+            }
+        }
+        catch (Exception ex)
+        {
+            ToastService.ShowError($"Error loading orders: {ex.Message}");
+        }
+        finally
+        {
+            _isLoading = false;
+            StateHasChanged();
+        }
+    }
+
+    private void OnSearchKeyUp(KeyboardEventArgs e)
+    {
+        _searchDebounceTimer?.Stop();
+        _searchDebounceTimer?.Dispose();
+
+        _searchDebounceTimer = new System.Timers.Timer(300);
+        _searchDebounceTimer.Elapsed += async (s, args) =>
+        {
+            _searchDebounceTimer?.Stop();
+            _pageNumber = 1;
+            await InvokeAsync(LoadOrders);
+        };
+        _searchDebounceTimer.AutoReset = false;
+        _searchDebounceTimer.Start();
+    }
+
+    private async Task ClearFilters()
+    {
+        _searchTerm = string.Empty;
+        _statusFilter = string.Empty;
+        _paymentFilter = string.Empty;
+        _fromDate = null;
+        _toDate = null;
+        _pageNumber = 1;
+        await LoadOrders();
+    }
+
+    private async Task GoToPage(int page)
+    {
+        if (page < 1 || page > (_orders?.TotalPages ?? 1)) return;
+        _pageNumber = page;
+        await LoadOrders();
+    }
+
+    private int GetStartPage()
+    {
+        var totalPages = _orders?.TotalPages ?? 1;
+        var start = Math.Max(1, _pageNumber - 2);
+        return Math.Min(start, Math.Max(1, totalPages - 4));
+    }
+
+    private int GetEndPage()
+    {
+        var totalPages = _orders?.TotalPages ?? 1;
+        return Math.Min(totalPages, GetStartPage() + 4);
+    }
+
+    private void ViewOrder(Guid id) => Navigation.NavigateTo($"orders/{id}");
+
+    private async Task ConfirmOrder(OrderDto order)
+    {
+        try
+        {
+            var response = await Http.PostAsync<object>($"api/orders/{order.Id}/confirm", new { });
+            if (response.Success)
+            {
+                ToastService.ShowSuccess($"Order {order.OrderNumber} confirmed");
+                await LoadOrders();
+            }
+            else
+            {
+                ToastService.ShowError(response.Message ?? "Failed to confirm order");
+            }
+        }
+        catch (Exception ex)
+        {
+            ToastService.ShowError($"Error confirming order: {ex.Message}");
+        }
+    }
+
+    private void ShowCancelModal(OrderDto order)
+    {
+        _orderToCancel = order;
+        _cancelReason = string.Empty;
+    }
+
+    private void HideCancelModal()
+    {
+        _orderToCancel = null;
+        _isCancelling = false;
+    }
+
+    private async Task CancelOrder()
+    {
+        if (_orderToCancel == null) return;
+        _isCancelling = true;
+
+        try
+        {
+            var response = await Http.PostAsync<object>($"api/orders/{_orderToCancel.Id}/cancel", new { reason = _cancelReason });
+            if (response.Success)
+            {
+                ToastService.ShowSuccess($"Order {_orderToCancel.OrderNumber} cancelled");
+                HideCancelModal();
+                await LoadOrders();
+            }
+            else
+            {
+                ToastService.ShowError(response.Message ?? "Failed to cancel order");
+            }
+        }
+        catch (Exception ex)
+        {
+            ToastService.ShowError($"Error cancelling order: {ex.Message}");
+        }
+        finally
+        {
+            _isCancelling = false;
+        }
+    }
+
+    private static string GetStatusColor(string status) => status switch
+    {
+        "Pending" => "warning",
+        "Confirmed" => "info",
+        "Processing" => "primary",
+        "Shipped" => "success",
+        "Delivered" => "secondary",
+        "Cancelled" => "danger",
+        _ => "secondary"
+    };
+
+    private static string GetPaymentStatusColor(string status) => status switch
+    {
+        "Pending" => "warning",
+        "Paid" => "success",
+        "Failed" => "danger",
+        "Refunded" => "info",
+        "PartiallyPaid" => "warning",
+        _ => "secondary"
+    };
+
+    public void Dispose() => _searchDebounceTimer?.Dispose();
+
+    // DTO classes
+    private class OrderDto
+    {
+        public Guid Id { get; set; }
+        public string OrderNumber { get; set; } = string.Empty;
+        public string CustomerName { get; set; } = string.Empty;
+        public string Status { get; set; } = string.Empty;
+        public string PaymentStatus { get; set; } = string.Empty;
+        public DateTime OrderDate { get; set; }
+        public decimal TotalAmount { get; set; }
+        public int ItemCount { get; set; }
+    }
+
+    private class PaginatedResponse<T>
+    {
+        public IReadOnlyList<T> Items { get; set; } = Array.Empty<T>();
+        public int PageNumber { get; set; }
+        public int PageSize { get; set; }
+        public int TotalCount { get; set; }
+        public int TotalPages { get; set; }
+        public bool HasPreviousPage { get; set; }
+        public bool HasNextPage { get; set; }
+    }
+}

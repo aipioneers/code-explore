@@ -1,0 +1,542 @@
+@page "/products/{Id:guid}"
+@attribute [Authorize]
+@inject HttpClientService Http
+@inject NavigationManager Navigation
+@inject IToastService ToastService
+
+<PageTitle>@(_product?.Name ?? "Product Details") - EnterpriseApp</PageTitle>
+
+@if (_isLoading)
+{
+    <div class="text-center py-5">
+        <div class="spinner-border text-primary" role="status">
+            <span class="visually-hidden">Loading...</span>
+        </div>
+    </div>
+}
+else if (_product == null)
+{
+    <div class="text-center py-5">
+        <i class="bi bi-exclamation-circle display-1 text-warning"></i>
+        <p class="text-muted mt-3">Product not found.</p>
+        <a href="products" class="btn btn-primary">Back to Products</a>
+    </div>
+}
+else
+{
+    <!-- Header -->
+    <div class="d-flex justify-content-between align-items-start mb-4">
+        <div>
+            <nav aria-label="breadcrumb">
+                <ol class="breadcrumb mb-2">
+                    <li class="breadcrumb-item"><a href="products">Products</a></li>
+                    <li class="breadcrumb-item active">@_product.Sku</li>
+                </ol>
+            </nav>
+            <h1 class="mb-1">@_product.Name</h1>
+            <div class="text-muted">
+                <code>@_product.Sku</code>
+                <span class="mx-2">•</span>
+                <span class="badge bg-light text-dark">@_product.CategoryName</span>
+                <span class="mx-2">•</span>
+                <span class="badge bg-@GetStatusColor(_product.Status)">@_product.Status</span>
+            </div>
+        </div>
+        <div class="btn-group">
+            <a href="products/@Id/edit" class="btn btn-primary">
+                <i class="bi bi-pencil me-1"></i> Edit
+            </a>
+            <button class="btn btn-outline-danger" @onclick="ConfirmDelete">
+                <i class="bi bi-trash me-1"></i> Delete
+            </button>
+        </div>
+    </div>
+
+    <div class="row g-4">
+        <!-- Main Content -->
+        <div class="col-lg-8">
+            <!-- Images Gallery -->
+            @if (_product.Images.Any())
+            {
+                <div class="card mb-4">
+                    <div class="card-body">
+                        <div class="row g-2">
+                            @foreach (var image in _product.Images)
+                            {
+                                <div class="col-md-3">
+                                    <img src="@image.Url" alt="@(image.AltText ?? _product.Name)"
+                                         class="img-fluid rounded @(image.IsPrimary ? "border border-primary border-2" : "")" />
+                                    @if (image.IsPrimary)
+                                    {
+                                        <small class="text-primary d-block text-center mt-1">Primary</small>
+                                    }
+                                </div>
+                            }
+                        </div>
+                    </div>
+                </div>
+            }
+
+            <!-- Description -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="mb-0">Description</h5>
+                </div>
+                <div class="card-body">
+                    @if (!string.IsNullOrEmpty(_product.ShortDescription))
+                    {
+                        <p class="lead">@_product.ShortDescription</p>
+                    }
+                    @if (!string.IsNullOrEmpty(_product.Description))
+                    {
+                        <div style="white-space: pre-wrap;">@_product.Description</div>
+                    }
+                    else
+                    {
+                        <p class="text-muted mb-0">No description available.</p>
+                    }
+                </div>
+            </div>
+
+            <!-- Variants -->
+            @if (_product.HasVariants && _product.Variants.Any())
+            {
+                <div class="card mb-4">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0">Variants (@_product.Variants.Count)</h5>
+                        <button class="btn btn-sm btn-outline-primary">
+                            <i class="bi bi-plus-lg me-1"></i> Add Variant
+                        </button>
+                    </div>
+                    <div class="table-responsive">
+                        <table class="table mb-0">
+                            <thead class="table-light">
+                                <tr>
+                                    <th>SKU</th>
+                                    <th>Name</th>
+                                    <th class="text-end">Price Adj.</th>
+                                    <th class="text-end">Final Price</th>
+                                    <th class="text-center">Stock</th>
+                                    <th>Status</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var variant in _product.Variants)
+                                {
+                                    <tr>
+                                        <td><code>@variant.Sku</code></td>
+                                        <td>@variant.Name</td>
+                                        <td class="text-end @(variant.PriceAdjustment >= 0 ? "text-success" : "text-danger")">
+                                            @(variant.PriceAdjustment >= 0 ? "+" : "")@variant.PriceAdjustment.ToString("C")
+                                        </td>
+                                        <td class="text-end">@variant.FinalPrice.ToString("C")</td>
+                                        <td class="text-center">
+                                            <span class="badge bg-@(variant.StockQuantity > 0 ? "success" : "danger")">
+                                                @variant.StockQuantity
+                                            </span>
+                                        </td>
+                                        <td>
+                                            <span class="badge bg-@(variant.IsActive ? "success" : "secondary")">
+                                                @(variant.IsActive ? "Active" : "Inactive")
+                                            </span>
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            }
+
+            <!-- Physical Attributes -->
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="mb-0">Physical Attributes</h5>
+                </div>
+                <div class="card-body">
+                    <div class="row g-3">
+                        <div class="col-md-4">
+                            <label class="text-muted small">Weight</label>
+                            <div>@(_product.Weight?.ToString("N3") ?? "—") kg</div>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="text-muted small">Dimensions</label>
+                            <div>@(_product.Dimensions ?? "—")</div>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="text-muted small">Barcode</label>
+                            <div>@(_product.Barcode ?? "—")</div>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="text-muted small">Manufacturer</label>
+                            <div>@(_product.Manufacturer ?? "—")</div>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="text-muted small">MPN</label>
+                            <div>@(_product.ManufacturerPartNumber ?? "—")</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Sidebar -->
+        <div class="col-lg-4">
+            <!-- Pricing Card -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="mb-0">Pricing</h5>
+                </div>
+                <div class="card-body">
+                    <dl class="mb-0">
+                        <dt class="text-muted small">Base Price</dt>
+                        <dd class="h4 mb-3">@_product.BasePrice.ToString("C")</dd>
+
+                        <dt class="text-muted small">Tax Rate</dt>
+                        <dd>@_product.TaxRate.ToString("N1")%</dd>
+
+                        <dt class="text-muted small">Price with Tax</dt>
+                        <dd class="h5 text-primary">@_product.PriceWithTax.ToString("C")</dd>
+
+                        @if (_product.CostPrice.HasValue)
+                        {
+                            <dt class="text-muted small">Cost Price</dt>
+                            <dd>@_product.CostPrice.Value.ToString("C")</dd>
+
+                            <dt class="text-muted small">Margin</dt>
+                            <dd class="@(_product.MarginPercentage >= 0 ? "text-success" : "text-danger")">
+                                @_product.MarginPercentage?.ToString("N1")%
+                            </dd>
+                        }
+                    </dl>
+                </div>
+            </div>
+
+            <!-- Inventory Card -->
+            <div class="card mb-4">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0">Inventory</h5>
+                    <button class="btn btn-sm btn-outline-primary" @onclick="ShowUpdateStockModal">
+                        Update Stock
+                    </button>
+                </div>
+                <div class="card-body">
+                    <div class="text-center mb-3">
+                        <div class="display-4 @GetStockColor()">@_product.StockQuantity</div>
+                        <div class="text-muted">units in stock</div>
+                    </div>
+
+                    @if (_product.IsOutOfStock)
+                    {
+                        <div class="alert alert-danger mb-3">
+                            <i class="bi bi-exclamation-triangle me-1"></i>
+                            Out of Stock
+                        </div>
+                    }
+                    else if (_product.IsLowStock)
+                    {
+                        <div class="alert alert-warning mb-3">
+                            <i class="bi bi-exclamation-circle me-1"></i>
+                            Low Stock (threshold: @_product.LowStockThreshold)
+                        </div>
+                    }
+
+                    <dl class="mb-0">
+                        <dt class="text-muted small">Low Stock Threshold</dt>
+                        <dd>@_product.LowStockThreshold</dd>
+
+                        <dt class="text-muted small">Allow Backorder</dt>
+                        <dd>@(_product.AllowBackorder ? "Yes" : "No")</dd>
+                    </dl>
+                </div>
+            </div>
+
+            <!-- SEO Card -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="mb-0">SEO</h5>
+                </div>
+                <div class="card-body">
+                    <dl class="mb-0">
+                        <dt class="text-muted small">Meta Title</dt>
+                        <dd>@(_product.MetaTitle ?? "—")</dd>
+
+                        <dt class="text-muted small">Meta Description</dt>
+                        <dd>@(_product.MetaDescription ?? "—")</dd>
+
+                        <dt class="text-muted small">Keywords</dt>
+                        <dd class="mb-0">@(_product.MetaKeywords ?? "—")</dd>
+                    </dl>
+                </div>
+            </div>
+
+            <!-- Record Info -->
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="mb-0">Record Info</h5>
+                </div>
+                <div class="card-body">
+                    <dl class="mb-0">
+                        <dt class="text-muted small">Created</dt>
+                        <dd>@_product.CreatedAt.ToString("F")</dd>
+
+                        @if (_product.ModifiedAt.HasValue)
+                        {
+                            <dt class="text-muted small">Last Modified</dt>
+                            <dd class="mb-0">@_product.ModifiedAt.Value.ToString("F")</dd>
+                        }
+                    </dl>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- Delete Modal -->
+@if (_showDeleteModal)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Delete Product</h5>
+                    <button type="button" class="btn-close" @onclick="CancelDelete"></button>
+                </div>
+                <div class="modal-body">
+                    <p>Are you sure you want to delete <strong>@_product?.Name</strong>?</p>
+                    <p class="text-muted mb-0">This action cannot be undone.</p>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" @onclick="CancelDelete">Cancel</button>
+                    <button type="button" class="btn btn-danger" @onclick="DeleteProduct" disabled="@_isDeleting">
+                        @if (_isDeleting)
+                        {
+                            <span class="spinner-border spinner-border-sm me-1"></span>
+                        }
+                        Delete
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- Update Stock Modal -->
+@if (_showStockModal)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Update Stock</h5>
+                    <button type="button" class="btn-close" @onclick="CancelUpdateStock"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label">New Stock Quantity</label>
+                        <input type="number" class="form-control" @bind="_newStockQuantity" min="0" />
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Reason (optional)</label>
+                        <input type="text" class="form-control" @bind="_stockUpdateReason" placeholder="e.g., Inventory count, Received shipment" />
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" @onclick="CancelUpdateStock">Cancel</button>
+                    <button type="button" class="btn btn-primary" @onclick="UpdateStock" disabled="@_isUpdatingStock">
+                        @if (_isUpdatingStock)
+                        {
+                            <span class="spinner-border spinner-border-sm me-1"></span>
+                        }
+                        Update Stock
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter]
+    public Guid Id { get; set; }
+
+    private ProductDetailDto? _product;
+    private bool _isLoading = true;
+    private bool _showDeleteModal = false;
+    private bool _isDeleting = false;
+    private bool _showStockModal = false;
+    private bool _isUpdatingStock = false;
+    private int _newStockQuantity;
+    private string _stockUpdateReason = string.Empty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadProduct();
+    }
+
+    private async Task LoadProduct()
+    {
+        _isLoading = true;
+
+        try
+        {
+            var response = await Http.GetAsync<ProductDetailDto>($"api/products/{Id}");
+            if (response.Success)
+            {
+                _product = response.Data;
+            }
+            else if (response.StatusCode == 404)
+            {
+                _product = null;
+            }
+            else
+            {
+                ToastService.ShowError(response.Message ?? "Failed to load product");
+            }
+        }
+        catch (Exception ex)
+        {
+            ToastService.ShowError($"Error loading product: {ex.Message}");
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+    }
+
+    private void ConfirmDelete() => _showDeleteModal = true;
+    private void CancelDelete() { _showDeleteModal = false; _isDeleting = false; }
+
+    private async Task DeleteProduct()
+    {
+        _isDeleting = true;
+        try
+        {
+            var response = await Http.DeleteAsync<object>($"api/products/{Id}");
+            if (response.Success)
+            {
+                ToastService.ShowSuccess($"Product {_product?.Name} deleted successfully");
+                Navigation.NavigateTo("products");
+            }
+            else
+            {
+                ToastService.ShowError(response.Message ?? "Failed to delete product");
+            }
+        }
+        catch (Exception ex)
+        {
+            ToastService.ShowError($"Error deleting product: {ex.Message}");
+        }
+        finally
+        {
+            _isDeleting = false;
+            _showDeleteModal = false;
+        }
+    }
+
+    private void ShowUpdateStockModal()
+    {
+        _newStockQuantity = _product?.StockQuantity ?? 0;
+        _stockUpdateReason = string.Empty;
+        _showStockModal = true;
+    }
+
+    private void CancelUpdateStock() { _showStockModal = false; _isUpdatingStock = false; }
+
+    private async Task UpdateStock()
+    {
+        _isUpdatingStock = true;
+        try
+        {
+            var response = await Http.PutAsync<object>($"api/products/{Id}/stock", new { quantity = _newStockQuantity, reason = _stockUpdateReason });
+            if (response.Success)
+            {
+                ToastService.ShowSuccess("Stock updated successfully");
+                _showStockModal = false;
+                await LoadProduct();
+            }
+            else
+            {
+                ToastService.ShowError(response.Message ?? "Failed to update stock");
+            }
+        }
+        catch (Exception ex)
+        {
+            ToastService.ShowError($"Error updating stock: {ex.Message}");
+        }
+        finally
+        {
+            _isUpdatingStock = false;
+        }
+    }
+
+    private static string GetStatusColor(string status) => status.ToLowerInvariant() switch
+    {
+        "active" => "success",
+        "draft" => "secondary",
+        "inactive" => "warning",
+        "discontinued" => "danger",
+        _ => "secondary"
+    };
+
+    private string GetStockColor()
+    {
+        if (_product?.IsOutOfStock == true) return "text-danger";
+        if (_product?.IsLowStock == true) return "text-warning";
+        return "text-success";
+    }
+
+    // DTO classes
+    private class ProductDetailDto
+    {
+        public Guid Id { get; set; }
+        public string Sku { get; set; } = string.Empty;
+        public string Name { get; set; } = string.Empty;
+        public string? ShortDescription { get; set; }
+        public string? Description { get; set; }
+        public string CategoryName { get; set; } = string.Empty;
+        public decimal BasePrice { get; set; }
+        public decimal? CostPrice { get; set; }
+        public decimal TaxRate { get; set; }
+        public decimal PriceWithTax { get; set; }
+        public decimal? MarginPercentage { get; set; }
+        public string Status { get; set; } = string.Empty;
+        public bool HasVariants { get; set; }
+        public decimal? Weight { get; set; }
+        public string? Dimensions { get; set; }
+        public string? Manufacturer { get; set; }
+        public string? ManufacturerPartNumber { get; set; }
+        public string? Barcode { get; set; }
+        public int StockQuantity { get; set; }
+        public int LowStockThreshold { get; set; }
+        public bool AllowBackorder { get; set; }
+        public bool IsLowStock { get; set; }
+        public bool IsOutOfStock { get; set; }
+        public string? MetaTitle { get; set; }
+        public string? MetaDescription { get; set; }
+        public string? MetaKeywords { get; set; }
+        public DateTime CreatedAt { get; set; }
+        public DateTime? ModifiedAt { get; set; }
+        public IReadOnlyList<ProductVariantDto> Variants { get; set; } = Array.Empty<ProductVariantDto>();
+        public IReadOnlyList<ProductImageDto> Images { get; set; } = Array.Empty<ProductImageDto>();
+    }
+
+    private class ProductVariantDto
+    {
+        public Guid Id { get; set; }
+        public string Sku { get; set; } = string.Empty;
+        public string Name { get; set; } = string.Empty;
+        public decimal PriceAdjustment { get; set; }
+        public decimal FinalPrice { get; set; }
+        public int StockQuantity { get; set; }
+        public bool IsActive { get; set; }
+    }
+
+    private class ProductImageDto
+    {
+        public Guid Id { get; set; }
+        public string Url { get; set; } = string.Empty;
+        public string? AltText { get; set; }
+        public bool IsPrimary { get; set; }
+    }
+}

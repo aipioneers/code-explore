@@ -1,0 +1,419 @@
+@page "/products/new"
+@page "/products/{Id:guid}/edit"
+@attribute [Authorize]
+@inject HttpClientService Http
+@inject NavigationManager Navigation
+@inject IToastService ToastService
+
+<PageTitle>@(_isEditMode ? "Edit Product" : "New Product") - EnterpriseApp</PageTitle>
+
+<nav aria-label="breadcrumb" class="mb-3">
+    <ol class="breadcrumb">
+        <li class="breadcrumb-item"><a href="products">Products</a></li>
+        @if (_isEditMode && _model != null)
+        {
+            <li class="breadcrumb-item"><a href="products/@Id">@_originalSku</a></li>
+            <li class="breadcrumb-item active">Edit</li>
+        }
+        else
+        {
+            <li class="breadcrumb-item active">New Product</li>
+        }
+    </ol>
+</nav>
+
+<h1 class="mb-4">@(_isEditMode ? "Edit Product" : "New Product")</h1>
+
+@if (_isLoading)
+{
+    <div class="text-center py-5">
+        <div class="spinner-border text-primary" role="status">
+            <span class="visually-hidden">Loading...</span>
+        </div>
+    </div>
+}
+else if (_isEditMode && _model == null)
+{
+    <div class="text-center py-5">
+        <i class="bi bi-exclamation-circle display-1 text-warning"></i>
+        <p class="text-muted mt-3">Product not found.</p>
+        <a href="products" class="btn btn-primary">Back to Products</a>
+    </div>
+}
+else
+{
+    <EditForm Model="_model" OnValidSubmit="HandleSubmit">
+        <DataAnnotationsValidator />
+
+        <div class="row g-4">
+            <!-- Main Form -->
+            <div class="col-lg-8">
+                <!-- Basic Info -->
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h5 class="mb-0">Basic Information</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="row g-3">
+                            <div class="col-md-4">
+                                <label class="form-label">SKU <span class="text-danger">*</span></label>
+                                <InputText @bind-Value="_model!.Sku" class="form-control" disabled="@_isEditMode" />
+                                <ValidationMessage For="() => _model.Sku" class="text-danger small" />
+                            </div>
+                            <div class="col-md-8">
+                                <label class="form-label">Name <span class="text-danger">*</span></label>
+                                <InputText @bind-Value="_model!.Name" class="form-control" />
+                                <ValidationMessage For="() => _model.Name" class="text-danger small" />
+                            </div>
+                            <div class="col-12">
+                                <label class="form-label">Category <span class="text-danger">*</span></label>
+                                <InputSelect @bind-Value="_model!.CategoryId" class="form-select">
+                                    <option value="@Guid.Empty">Select a category...</option>
+                                    @foreach (var category in _categories)
+                                    {
+                                        <option value="@category.Id">@category.Name</option>
+                                    }
+                                </InputSelect>
+                                <ValidationMessage For="() => _model.CategoryId" class="text-danger small" />
+                            </div>
+                            <div class="col-12">
+                                <label class="form-label">Short Description</label>
+                                <InputText @bind-Value="_model!.ShortDescription" class="form-control" />
+                                <div class="form-text">Brief summary shown in product listings.</div>
+                            </div>
+                            <div class="col-12">
+                                <label class="form-label">Full Description</label>
+                                <InputTextArea @bind-Value="_model!.Description" class="form-control" rows="5" />
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Physical Attributes -->
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h5 class="mb-0">Physical Attributes</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="row g-3">
+                            <div class="col-md-4">
+                                <label class="form-label">Weight (kg)</label>
+                                <InputNumber @bind-Value="_model!.Weight" class="form-control" step="0.001" />
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label">Dimensions</label>
+                                <InputText @bind-Value="_model!.Dimensions" class="form-control" placeholder="L x W x H" />
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label">Barcode (EAN/UPC)</label>
+                                <InputText @bind-Value="_model!.Barcode" class="form-control" />
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label">Manufacturer</label>
+                                <InputText @bind-Value="_model!.Manufacturer" class="form-control" />
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label">Manufacturer Part Number</label>
+                                <InputText @bind-Value="_model!.ManufacturerPartNumber" class="form-control" />
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- SEO -->
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h5 class="mb-0">SEO</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="row g-3">
+                            <div class="col-12">
+                                <label class="form-label">Meta Title</label>
+                                <InputText @bind-Value="_model!.MetaTitle" class="form-control" maxlength="100" />
+                            </div>
+                            <div class="col-12">
+                                <label class="form-label">Meta Description</label>
+                                <InputTextArea @bind-Value="_model!.MetaDescription" class="form-control" rows="2" maxlength="300" />
+                            </div>
+                            <div class="col-12">
+                                <label class="form-label">Meta Keywords</label>
+                                <InputText @bind-Value="_model!.MetaKeywords" class="form-control" placeholder="keyword1, keyword2, keyword3" />
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Sidebar -->
+            <div class="col-lg-4">
+                <!-- Pricing -->
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h5 class="mb-0">Pricing</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="mb-3">
+                            <label class="form-label">Base Price <span class="text-danger">*</span></label>
+                            <div class="input-group">
+                                <span class="input-group-text">$</span>
+                                <InputNumber @bind-Value="_model!.BasePrice" class="form-control" step="0.01" />
+                            </div>
+                            <ValidationMessage For="() => _model.BasePrice" class="text-danger small" />
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Cost Price</label>
+                            <div class="input-group">
+                                <span class="input-group-text">$</span>
+                                <InputNumber @bind-Value="_model!.CostPrice" class="form-control" step="0.01" />
+                            </div>
+                        </div>
+                        <div>
+                            <label class="form-label">Tax Rate (%)</label>
+                            <InputNumber @bind-Value="_model!.TaxRate" class="form-control" step="0.01" min="0" max="100" />
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Inventory -->
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h5 class="mb-0">Inventory</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="mb-3">
+                            <label class="form-label">Low Stock Threshold</label>
+                            <InputNumber @bind-Value="_model!.LowStockThreshold" class="form-control" min="0" />
+                        </div>
+                        <div class="form-check">
+                            <InputCheckbox @bind-Value="_model!.AllowBackorder" class="form-check-input" id="allowBackorder" />
+                            <label class="form-check-label" for="allowBackorder">
+                                Allow backorders
+                            </label>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Actions -->
+                <div class="card">
+                    <div class="card-body">
+                        <div class="d-grid gap-2">
+                            <button type="submit" class="btn btn-primary" disabled="@_isSaving">
+                                @if (_isSaving)
+                                {
+                                    <span class="spinner-border spinner-border-sm me-1"></span>
+                                }
+                                @(_isEditMode ? "Save Changes" : "Create Product")
+                            </button>
+                            <a href="@(_isEditMode ? $"products/{Id}" : "products")" class="btn btn-outline-secondary">
+                                Cancel
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </EditForm>
+}
+
+@code {
+    [Parameter]
+    public Guid? Id { get; set; }
+
+    private ProductFormModel? _model;
+    private List<CategoryDto> _categories = new();
+    private bool _isEditMode => Id.HasValue;
+    private bool _isLoading = true;
+    private bool _isSaving = false;
+    private string _originalSku = string.Empty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadCategories();
+
+        if (_isEditMode)
+        {
+            await LoadProduct();
+        }
+        else
+        {
+            _model = new ProductFormModel();
+            _isLoading = false;
+        }
+    }
+
+    private async Task LoadCategories()
+    {
+        try
+        {
+            var response = await Http.GetAsync<List<CategoryDto>>("api/categories?flatList=true");
+            if (response.Success && response.Data != null)
+            {
+                _categories = response.Data;
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error loading categories: {ex.Message}");
+        }
+    }
+
+    private async Task LoadProduct()
+    {
+        try
+        {
+            var response = await Http.GetAsync<ProductDetailDto>($"api/products/{Id}");
+            if (response.Success && response.Data != null)
+            {
+                var product = response.Data;
+                _originalSku = product.Sku;
+                _model = new ProductFormModel
+                {
+                    Sku = product.Sku,
+                    Name = product.Name,
+                    ShortDescription = product.ShortDescription,
+                    Description = product.Description,
+                    CategoryId = product.CategoryId,
+                    BasePrice = product.BasePrice,
+                    CostPrice = product.CostPrice,
+                    TaxRate = product.TaxRate,
+                    Weight = product.Weight,
+                    Dimensions = product.Dimensions,
+                    Manufacturer = product.Manufacturer,
+                    ManufacturerPartNumber = product.ManufacturerPartNumber,
+                    Barcode = product.Barcode,
+                    LowStockThreshold = product.LowStockThreshold,
+                    AllowBackorder = product.AllowBackorder,
+                    MetaTitle = product.MetaTitle,
+                    MetaDescription = product.MetaDescription,
+                    MetaKeywords = product.MetaKeywords
+                };
+            }
+            else if (response.StatusCode == 404)
+            {
+                _model = null;
+            }
+            else
+            {
+                ToastService.ShowError(response.Message ?? "Failed to load product");
+            }
+        }
+        catch (Exception ex)
+        {
+            ToastService.ShowError($"Error loading product: {ex.Message}");
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+    }
+
+    private async Task HandleSubmit()
+    {
+        if (_model == null) return;
+
+        _isSaving = true;
+
+        try
+        {
+            ApiResponse<ProductDto> response;
+
+            if (_isEditMode)
+            {
+                response = await Http.PutAsync<ProductDto>($"api/products/{Id}", _model);
+            }
+            else
+            {
+                response = await Http.PostAsync<ProductDto>("api/products", _model);
+            }
+
+            if (response.Success && response.Data != null)
+            {
+                ToastService.ShowSuccess(_isEditMode ? "Product updated successfully" : "Product created successfully");
+                Navigation.NavigateTo($"products/{response.Data.Id}");
+            }
+            else
+            {
+                ToastService.ShowError(response.Message ?? "Failed to save product");
+            }
+        }
+        catch (Exception ex)
+        {
+            ToastService.ShowError($"Error saving product: {ex.Message}");
+        }
+        finally
+        {
+            _isSaving = false;
+        }
+    }
+
+    // Form model
+    private class ProductFormModel
+    {
+        [System.ComponentModel.DataAnnotations.Required(ErrorMessage = "SKU is required")]
+        [System.ComponentModel.DataAnnotations.StringLength(50, ErrorMessage = "SKU must not exceed 50 characters")]
+        public string Sku { get; set; } = string.Empty;
+
+        [System.ComponentModel.DataAnnotations.Required(ErrorMessage = "Name is required")]
+        [System.ComponentModel.DataAnnotations.StringLength(200, ErrorMessage = "Name must not exceed 200 characters")]
+        public string Name { get; set; } = string.Empty;
+
+        public string? ShortDescription { get; set; }
+        public string? Description { get; set; }
+
+        [System.ComponentModel.DataAnnotations.Required(ErrorMessage = "Category is required")]
+        public Guid CategoryId { get; set; }
+
+        [System.ComponentModel.DataAnnotations.Range(0, double.MaxValue, ErrorMessage = "Base price must be non-negative")]
+        public decimal BasePrice { get; set; }
+
+        public decimal? CostPrice { get; set; }
+
+        [System.ComponentModel.DataAnnotations.Range(0, 100, ErrorMessage = "Tax rate must be between 0 and 100")]
+        public decimal TaxRate { get; set; }
+
+        public decimal? Weight { get; set; }
+        public string? Dimensions { get; set; }
+        public string? Manufacturer { get; set; }
+        public string? ManufacturerPartNumber { get; set; }
+        public string? Barcode { get; set; }
+        public int LowStockThreshold { get; set; } = 5;
+        public bool AllowBackorder { get; set; }
+        public string? MetaTitle { get; set; }
+        public string? MetaDescription { get; set; }
+        public string? MetaKeywords { get; set; }
+    }
+
+    // DTO classes
+    private class CategoryDto
+    {
+        public Guid Id { get; set; }
+        public string Name { get; set; } = string.Empty;
+    }
+
+    private class ProductDetailDto
+    {
+        public string Sku { get; set; } = string.Empty;
+        public string Name { get; set; } = string.Empty;
+        public string? ShortDescription { get; set; }
+        public string? Description { get; set; }
+        public Guid CategoryId { get; set; }
+        public decimal BasePrice { get; set; }
+        public decimal? CostPrice { get; set; }
+        public decimal TaxRate { get; set; }
+        public decimal? Weight { get; set; }
+        public string? Dimensions { get; set; }
+        public string? Manufacturer { get; set; }
+        public string? ManufacturerPartNumber { get; set; }
+        public string? Barcode { get; set; }
+        public int LowStockThreshold { get; set; }
+        public bool AllowBackorder { get; set; }
+        public string? MetaTitle { get; set; }
+        public string? MetaDescription { get; set; }
+        public string? MetaKeywords { get; set; }
+    }
+
+    private class ProductDto
+    {
+        public Guid Id { get; set; }
+    }
+}

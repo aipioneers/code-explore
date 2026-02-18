@@ -1,0 +1,396 @@
+@page "/reports"
+@attribute [Authorize(Roles = "Administrator,Manager")]
+@inject HttpClientService Http
+@inject IToastService ToastService
+
+<PageTitle>Reports - EnterpriseApp</PageTitle>
+
+<h1 class="mb-4">Reports</h1>
+
+<!-- Report Type Selection -->
+<div class="row g-4 mb-4">
+    <div class="col-md-4">
+        <div class="card h-100 cursor-pointer @(_selectedReport == "sales" ? "border-primary" : "")"
+             @onclick='() => SelectReport("sales")'>
+            <div class="card-body text-center">
+                <i class="bi bi-graph-up display-4 text-primary"></i>
+                <h5 class="mt-3">Sales Report</h5>
+                <p class="text-muted mb-0">Revenue, orders, top products & customers</p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card h-100 cursor-pointer @(_selectedReport == "inventory" ? "border-primary" : "")"
+             @onclick='() => SelectReport("inventory")'>
+            <div class="card-body text-center">
+                <i class="bi bi-box-seam display-4 text-success"></i>
+                <h5 class="mt-3">Inventory Report</h5>
+                <p class="text-muted mb-0">Stock levels, value, movement summary</p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card h-100 cursor-pointer @(_selectedReport == "customers" ? "border-primary" : "")"
+             @onclick='() => SelectReport("customers")'>
+            <div class="card-body text-center">
+                <i class="bi bi-people display-4 text-info"></i>
+                <h5 class="mt-3">Customer Report</h5>
+                <p class="text-muted mb-0">Growth, activity, revenue analysis</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Date Range Filter -->
+<div class="card mb-4">
+    <div class="card-body">
+        <div class="row g-3 align-items-end">
+            <div class="col-md-3">
+                <label class="form-label">From Date</label>
+                <input type="date" class="form-control" @bind="_fromDate" />
+            </div>
+            <div class="col-md-3">
+                <label class="form-label">To Date</label>
+                <input type="date" class="form-control" @bind="_toDate" />
+            </div>
+            <div class="col-md-3">
+                <div class="btn-group w-100">
+                    <button class="btn btn-outline-secondary" @onclick="SetLast7Days">7 Days</button>
+                    <button class="btn btn-outline-secondary" @onclick="SetLast30Days">30 Days</button>
+                    <button class="btn btn-outline-secondary" @onclick="SetThisMonth">This Month</button>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <button class="btn btn-primary w-100" @onclick="GenerateReport" disabled="@_isLoading">
+                    @if (_isLoading)
+                    {
+                        <span class="spinner-border spinner-border-sm me-1"></span>
+                    }
+                    Generate Report
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+@if (_isLoading)
+{
+    <div class="text-center py-5">
+        <div class="spinner-border text-primary" role="status">
+            <span class="visually-hidden">Loading...</span>
+        </div>
+    </div>
+}
+else if (_selectedReport == "sales" && _salesReport != null)
+{
+    <!-- Sales Report -->
+    <div class="row g-4 mb-4">
+        <div class="col-md-3">
+            <div class="card bg-primary text-white">
+                <div class="card-body">
+                    <h6>Total Sales</h6>
+                    <h3 class="mb-0">@_salesReport.TotalSales.ToString("C")</h3>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card bg-success text-white">
+                <div class="card-body">
+                    <h6>Total Orders</h6>
+                    <h3 class="mb-0">@_salesReport.TotalOrders</h3>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card bg-info text-white">
+                <div class="card-body">
+                    <h6>Average Order</h6>
+                    <h3 class="mb-0">@_salesReport.AverageOrderValue.ToString("C")</h3>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card bg-secondary text-white">
+                <div class="card-body">
+                    <h6>Items Sold</h6>
+                    <h3 class="mb-0">@_salesReport.TotalItemsSold</h3>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row g-4">
+        <!-- Top Products -->
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="mb-0">Top Products</h5>
+                </div>
+                <div class="table-responsive">
+                    <table class="table mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Product</th>
+                                <th class="text-end">Qty Sold</th>
+                                <th class="text-end">Revenue</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var product in _salesReport.TopProducts.Take(5))
+                            {
+                                <tr>
+                                    <td>
+                                        <div>@product.ProductName</div>
+                                        <small class="text-muted">@product.ProductSku</small>
+                                    </td>
+                                    <td class="text-end">@product.QuantitySold</td>
+                                    <td class="text-end fw-medium">@product.Revenue.ToString("C")</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Top Customers -->
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="mb-0">Top Customers</h5>
+                </div>
+                <div class="table-responsive">
+                    <table class="table mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Customer</th>
+                                <th class="text-end">Orders</th>
+                                <th class="text-end">Total Spent</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var customer in _salesReport.TopCustomers.Take(5))
+                            {
+                                <tr>
+                                    <td>@customer.CustomerName</td>
+                                    <td class="text-end">@customer.OrderCount</td>
+                                    <td class="text-end fw-medium">@customer.TotalSpent.ToString("C")</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Export Button -->
+    <div class="mt-4">
+        <a href="@GetExportUrl()" class="btn btn-outline-primary" target="_blank">
+            <i class="bi bi-download me-1"></i> Export to CSV
+        </a>
+    </div>
+}
+else if (_selectedReport == "inventory" && _inventoryReport != null)
+{
+    <!-- Inventory Report -->
+    <div class="row g-4 mb-4">
+        <div class="col-md-3">
+            <div class="card">
+                <div class="card-body">
+                    <h6 class="text-muted">Total Products</h6>
+                    <h3>@_inventoryReport.TotalProducts</h3>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card">
+                <div class="card-body">
+                    <h6 class="text-muted">Stock Value</h6>
+                    <h3>@_inventoryReport.TotalStockValue.ToString("C")</h3>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card bg-warning">
+                <div class="card-body">
+                    <h6>Low Stock</h6>
+                    <h3>@_inventoryReport.LowStockCount</h3>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card bg-danger text-white">
+                <div class="card-body">
+                    <h6>Out of Stock</h6>
+                    <h3>@_inventoryReport.OutOfStockCount</h3>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+else if (_selectedReport == "customers" && _customerReport != null)
+{
+    <!-- Customer Report -->
+    <div class="row g-4 mb-4">
+        <div class="col-md-3">
+            <div class="card">
+                <div class="card-body">
+                    <h6 class="text-muted">Total Customers</h6>
+                    <h3>@_customerReport.TotalCustomers</h3>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card bg-success text-white">
+                <div class="card-body">
+                    <h6>New Customers</h6>
+                    <h3>@_customerReport.NewCustomers</h3>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card bg-info text-white">
+                <div class="card-body">
+                    <h6>Active Customers</h6>
+                    <h3>@_customerReport.ActiveCustomers</h3>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card bg-primary text-white">
+                <div class="card-body">
+                    <h6>Avg. Customer Value</h6>
+                    <h3>@_customerReport.AverageCustomerValue.ToString("C")</h3>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+else
+{
+    <div class="text-center py-5">
+        <i class="bi bi-bar-chart display-1 text-muted"></i>
+        <p class="text-muted mt-3">Select a report type and date range, then click Generate Report.</p>
+    </div>
+}
+
+<style>
+    .cursor-pointer { cursor: pointer; }
+    .cursor-pointer:hover { box-shadow: 0 0.5rem 1rem rgba(0,0,0,0.15); }
+</style>
+
+@code {
+    private string _selectedReport = "sales";
+    private DateTime _fromDate = DateTime.UtcNow.AddDays(-30);
+    private DateTime _toDate = DateTime.UtcNow;
+    private bool _isLoading = false;
+
+    private SalesReportDto? _salesReport;
+    private InventoryReportDto? _inventoryReport;
+    private CustomerReportDto? _customerReport;
+
+    private void SelectReport(string report)
+    {
+        _selectedReport = report;
+        _salesReport = null;
+        _inventoryReport = null;
+        _customerReport = null;
+    }
+
+    private void SetLast7Days()
+    {
+        _fromDate = DateTime.UtcNow.AddDays(-7);
+        _toDate = DateTime.UtcNow;
+    }
+
+    private void SetLast30Days()
+    {
+        _fromDate = DateTime.UtcNow.AddDays(-30);
+        _toDate = DateTime.UtcNow;
+    }
+
+    private void SetThisMonth()
+    {
+        _fromDate = new DateTime(DateTime.UtcNow.Year, DateTime.UtcNow.Month, 1);
+        _toDate = DateTime.UtcNow;
+    }
+
+    private async Task GenerateReport()
+    {
+        _isLoading = true;
+        try
+        {
+            var from = _fromDate.ToString("yyyy-MM-dd");
+            var to = _toDate.ToString("yyyy-MM-dd");
+
+            if (_selectedReport == "sales")
+            {
+                var response = await Http.GetAsync<SalesReportDto>($"api/reports/sales?fromDate={from}&toDate={to}");
+                if (response.Success) _salesReport = response.Data;
+            }
+            else if (_selectedReport == "inventory")
+            {
+                var response = await Http.GetAsync<InventoryReportDto>("api/reports/inventory");
+                if (response.Success) _inventoryReport = response.Data;
+            }
+            else if (_selectedReport == "customers")
+            {
+                var response = await Http.GetAsync<CustomerReportDto>($"api/reports/customers?fromDate={from}&toDate={to}");
+                if (response.Success) _customerReport = response.Data;
+            }
+        }
+        catch (Exception ex)
+        {
+            ToastService.ShowError($"Error: {ex.Message}");
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+    }
+
+    private string GetExportUrl() => $"api/reports/{_selectedReport}/export?fromDate={_fromDate:yyyy-MM-dd}&toDate={_toDate:yyyy-MM-dd}";
+
+    // DTO classes
+    private class SalesReportDto
+    {
+        public decimal TotalSales { get; set; }
+        public int TotalOrders { get; set; }
+        public decimal AverageOrderValue { get; set; }
+        public int TotalItemsSold { get; set; }
+        public IReadOnlyList<TopProductDto> TopProducts { get; set; } = Array.Empty<TopProductDto>();
+        public IReadOnlyList<TopCustomerDto> TopCustomers { get; set; } = Array.Empty<TopCustomerDto>();
+    }
+
+    private class TopProductDto
+    {
+        public string ProductName { get; set; } = string.Empty;
+        public string ProductSku { get; set; } = string.Empty;
+        public int QuantitySold { get; set; }
+        public decimal Revenue { get; set; }
+    }
+
+    private class TopCustomerDto
+    {
+        public string CustomerName { get; set; } = string.Empty;
+        public int OrderCount { get; set; }
+        public decimal TotalSpent { get; set; }
+    }
+
+    private class InventoryReportDto
+    {
+        public int TotalProducts { get; set; }
+        public decimal TotalStockValue { get; set; }
+        public int LowStockCount { get; set; }
+        public int OutOfStockCount { get; set; }
+    }
+
+    private class CustomerReportDto
+    {
+        public int TotalCustomers { get; set; }
+        public int NewCustomers { get; set; }
+        public int ActiveCustomers { get; set; }
+        public decimal AverageCustomerValue { get; set; }
+    }
+}

@@ -1,0 +1,287 @@
+@page "/documents"
+@attribute [Authorize]
+@inject HttpClientService Http
+@inject NavigationManager Navigation
+@inject IToastService ToastService
+
+<PageTitle>Documents - EnterpriseApp</PageTitle>
+
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h1>Documents</h1>
+</div>
+
+<!-- Filters -->
+<div class="card mb-4">
+    <div class="card-body">
+        <div class="row g-3">
+            <div class="col-md-2">
+                <select class="form-select" @bind="_typeFilter" @bind:after="LoadDocuments">
+                    <option value="">All Types</option>
+                    <option value="Invoice">Invoice</option>
+                    <option value="CreditNote">Credit Note</option>
+                    <option value="DeliveryNote">Delivery Note</option>
+                    <option value="Quote">Quote</option>
+                    <option value="Receipt">Receipt</option>
+                </select>
+            </div>
+            <div class="col-md-2">
+                <select class="form-select" @bind="_statusFilter" @bind:after="LoadDocuments">
+                    <option value="">All Statuses</option>
+                    <option value="Draft">Draft</option>
+                    <option value="Final">Final</option>
+                    <option value="Sent">Sent</option>
+                    <option value="Paid">Paid</option>
+                    <option value="Voided">Voided</option>
+                </select>
+            </div>
+            <div class="col-md-2">
+                <input type="date" class="form-control" @bind="_fromDate" @bind:after="LoadDocuments" placeholder="From" />
+            </div>
+            <div class="col-md-2">
+                <input type="date" class="form-control" @bind="_toDate" @bind:after="LoadDocuments" placeholder="To" />
+            </div>
+            <div class="col-md-2">
+                <button class="btn btn-outline-secondary w-100" @onclick="ClearFilters">Clear</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+@if (_isLoading)
+{
+    <div class="text-center py-5">
+        <div class="spinner-border text-primary" role="status">
+            <span class="visually-hidden">Loading...</span>
+        </div>
+    </div>
+}
+else if (_documents?.Items.Any() != true)
+{
+    <div class="text-center py-5">
+        <i class="bi bi-file-earmark display-1 text-muted"></i>
+        <p class="text-muted mt-3">No documents found.</p>
+    </div>
+}
+else
+{
+    <div class="card">
+        <div class="table-responsive">
+            <table class="table table-hover mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th>Document #</th>
+                        <th>Type</th>
+                        <th>Customer</th>
+                        <th>Order</th>
+                        <th>Date</th>
+                        <th class="text-end">Amount</th>
+                        <th>Status</th>
+                        <th class="text-end">Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var doc in _documents.Items)
+                    {
+                        <tr>
+                            <td>
+                                <code>@doc.DocumentNumber</code>
+                            </td>
+                            <td>
+                                <span class="badge bg-@GetTypeColor(doc.Type)">@doc.Type</span>
+                            </td>
+                            <td>@(doc.CustomerName ?? "—")</td>
+                            <td>
+                                @if (doc.OrderId.HasValue)
+                                {
+                                    <a href="orders/@doc.OrderId">@doc.OrderNumber</a>
+                                }
+                                else
+                                {
+                                    <span>—</span>
+                                }
+                            </td>
+                            <td>@doc.DocumentDate.ToString("MMM d, yyyy")</td>
+                            <td class="text-end">
+                                @if (doc.TotalAmount.HasValue)
+                                {
+                                    @doc.TotalAmount.Value.ToString("C")
+                                }
+                                else
+                                {
+                                    <span>—</span>
+                                }
+                            </td>
+                            <td>
+                                <span class="badge bg-@GetStatusColor(doc.Status)">@doc.Status</span>
+                            </td>
+                            <td class="text-end">
+                                <div class="btn-group btn-group-sm">
+                                    <a href="documents/@doc.Id" class="btn btn-outline-primary" title="View">
+                                        <i class="bi bi-eye"></i>
+                                    </a>
+                                    @if (doc.HasFile)
+                                    {
+                                        <a href="api/documents/@doc.Id/download" class="btn btn-outline-secondary" title="Download" target="_blank">
+                                            <i class="bi bi-download"></i>
+                                        </a>
+                                    }
+                                    @if (doc.Status != "Voided")
+                                    {
+                                        <button class="btn btn-outline-info" title="Send" @onclick="() => SendDocument(doc)">
+                                            <i class="bi bi-send"></i>
+                                        </button>
+                                    }
+                                </div>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Pagination -->
+    @if (_documents.TotalPages > 1)
+    {
+        <nav class="mt-4">
+            <div class="d-flex justify-content-between align-items-center">
+                <div class="text-muted">
+                    Showing @((_pageNumber - 1) * _pageSize + 1) to @Math.Min(_pageNumber * _pageSize, _documents.TotalCount) of @_documents.TotalCount
+                </div>
+                <ul class="pagination mb-0">
+                    <li class="page-item @(!_documents.HasPreviousPage ? "disabled" : "")">
+                        <button class="page-link" @onclick="() => GoToPage(_pageNumber - 1)">Previous</button>
+                    </li>
+                    <li class="page-item @(!_documents.HasNextPage ? "disabled" : "")">
+                        <button class="page-link" @onclick="() => GoToPage(_pageNumber + 1)">Next</button>
+                    </li>
+                </ul>
+            </div>
+        </nav>
+    }
+}
+
+@code {
+    private PaginatedResponse<DocumentDto>? _documents;
+    private bool _isLoading = true;
+    private string _typeFilter = string.Empty;
+    private string _statusFilter = string.Empty;
+    private DateTime? _fromDate;
+    private DateTime? _toDate;
+    private int _pageNumber = 1;
+    private int _pageSize = 20;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadDocuments();
+    }
+
+    private async Task LoadDocuments()
+    {
+        _isLoading = true;
+        try
+        {
+            var url = $"api/documents?pageNumber={_pageNumber}&pageSize={_pageSize}";
+            if (!string.IsNullOrEmpty(_typeFilter)) url += $"&type={_typeFilter}";
+            if (!string.IsNullOrEmpty(_statusFilter)) url += $"&status={_statusFilter}";
+            if (_fromDate.HasValue) url += $"&fromDate={_fromDate.Value:yyyy-MM-dd}";
+            if (_toDate.HasValue) url += $"&toDate={_toDate.Value:yyyy-MM-dd}";
+
+            var response = await Http.GetAsync<PaginatedResponse<DocumentDto>>(url);
+            if (response.Success && response.Data != null)
+            {
+                _documents = response.Data;
+            }
+        }
+        catch (Exception ex)
+        {
+            ToastService.ShowError($"Error: {ex.Message}");
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+    }
+
+    private async Task ClearFilters()
+    {
+        _typeFilter = string.Empty;
+        _statusFilter = string.Empty;
+        _fromDate = null;
+        _toDate = null;
+        _pageNumber = 1;
+        await LoadDocuments();
+    }
+
+    private async Task GoToPage(int page)
+    {
+        _pageNumber = page;
+        await LoadDocuments();
+    }
+
+    private async Task SendDocument(DocumentDto doc)
+    {
+        try
+        {
+            var response = await Http.PostAsync<object>($"api/documents/{doc.Id}/send", new { email = "" });
+            if (response.Success)
+            {
+                ToastService.ShowSuccess("Document sent successfully");
+                await LoadDocuments();
+            }
+            else
+            {
+                ToastService.ShowError(response.Message ?? "Failed to send document");
+            }
+        }
+        catch (Exception ex)
+        {
+            ToastService.ShowError($"Error: {ex.Message}");
+        }
+    }
+
+    private static string GetTypeColor(string type) => type switch
+    {
+        "Invoice" => "primary",
+        "CreditNote" => "warning",
+        "DeliveryNote" => "info",
+        "Quote" => "secondary",
+        "Receipt" => "success",
+        _ => "secondary"
+    };
+
+    private static string GetStatusColor(string status) => status switch
+    {
+        "Draft" => "secondary",
+        "Final" => "primary",
+        "Sent" => "info",
+        "Paid" => "success",
+        "Voided" => "danger",
+        _ => "secondary"
+    };
+
+    private class DocumentDto
+    {
+        public Guid Id { get; set; }
+        public string DocumentNumber { get; set; } = string.Empty;
+        public string Type { get; set; } = string.Empty;
+        public string Status { get; set; } = string.Empty;
+        public Guid? OrderId { get; set; }
+        public string? OrderNumber { get; set; }
+        public string? CustomerName { get; set; }
+        public DateTime DocumentDate { get; set; }
+        public decimal? TotalAmount { get; set; }
+        public bool HasFile { get; set; }
+    }
+
+    private class PaginatedResponse<T>
+    {
+        public IReadOnlyList<T> Items { get; set; } = Array.Empty<T>();
+        public int PageNumber { get; set; }
+        public int PageSize { get; set; }
+        public int TotalCount { get; set; }
+        public int TotalPages { get; set; }
+        public bool HasPreviousPage { get; set; }
+        public bool HasNextPage { get; set; }
+    }
+}
