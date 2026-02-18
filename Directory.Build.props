@@ -1,0 +1,25 @@
+<Project>
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>12.0</LangVersion>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <AnalysisLevel>latest-recommended</AnalysisLevel>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <!-- Suppress specific code analysis warnings that conflict with domain design patterns -->
+    <NoWarn>$(NoWarn);CA1716;CA1000;CA1711;CA1305;CA1860;CA1304;CA1311;CA1307;CA2201;CA1848;CA1812;CA1822;CA1862;CA2227;CA1052;CA1056;CA1308;CA2007;CA1051;CA1309;CA5350;CA1861;CA1869;CS1998</NoWarn>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <Authors>Enterprise Platform Team</Authors>
+    <Company>Enterprise Corp</Company>
+    <Product>EnterpriseApp</Product>
+    <Copyright>Copyright (c) 2026 Enterprise Corp</Copyright>
+    <Version>1.0.0</Version>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.SourceLink.GitHub" Version="8.0.0" PrivateAssets="All"/>
+  </ItemGroup>
+</Project>

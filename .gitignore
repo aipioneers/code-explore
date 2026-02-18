@@ -1,0 +1,108 @@
+# .NET
+bin/
+obj/
+out/
+.vs/
+.vscode/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+*.userprefs
+
+# Build results
+[Dd]ebug/
+[Dd]ebugPublic/
+[Rr]elease/
+[Rr]eleases/
+x64/
+x86/
+[Ww][Ii][Nn]32/
+[Aa][Rr][Mm]/
+[Aa][Rr][Mm]64/
+bld/
+[Bb]in/
+[Oo]bj/
+[Oo]ut/
+[Ll]og/
+[Ll]ogs/
+
+# NuGet
+*.nupkg
+*.snupkg
+.nuget/
+packages/
+**/[Pp]ackages/*
+!**/[Pp]ackages/build/
+*.nuget.props
+*.nuget.targets
+project.lock.json
+project.fragment.lock.json
+artifacts/
+
+# IDE
+.idea/
+*.swp
+*~
+
+# Rider
+.idea/
+*.sln.iml
+
+# Visual Studio Code
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Linux
+*~
+
+# Test Results
+TestResults/
+*.trx
+coverage/
+*.coverage
+*.coveragexml
+
+# dotnet tool
+.config/dotnet-tools.json
+
+# Entity Framework
+*.db
+*.db-journal
+
+# User secrets
+secrets.json
+
+# Environment files
+.env
+.env.local
+.env.*.local
+appsettings.Local.json
+appsettings.*.Local.json
+
+# Docker
+docker-compose.override.yml
+
+# Publish output
+publish/
+
+# Logs
+logs/
+*.log
+
+# Misc
+BenchmarkDotNet.Artifacts/
