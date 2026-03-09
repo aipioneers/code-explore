@@ -106,3 +106,16 @@ logs/
 
 # Misc
 BenchmarkDotNet.Artifacts/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+*.egg
+.eggs/
+*.whl
+.venv/
+venv/
