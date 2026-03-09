@@ -1,7 +1,8 @@
 """Tests for hybrid search / reciprocal rank fusion."""
 
+from code_explore.config import reset_config
 from code_explore.models import Project, QualityMetrics, SearchResult
-from code_explore.search.hybrid import _reciprocal_rank_fusion, RRF_K
+from code_explore.search.hybrid import _reciprocal_rank_fusion
 
 
 def _make_result(pid: str, name: str, score: float, match_type: str = "fulltext") -> SearchResult:
@@ -44,7 +45,7 @@ class TestReciprocalRankFusion:
         # "a" appears in both → should be ranked first (higher combined score)
         assert result[0].project.id == "a"
         # "a" gets score from both lists
-        expected_score_a = 1.0 / (RRF_K + 1) + 1.0 / (RRF_K + 1)
+        expected_score_a = 1.0 / (60 + 1) + 1.0 / (60 + 1)
         assert abs(result[0].score - expected_score_a) < 0.001
 
     def test_disjoint_results(self):

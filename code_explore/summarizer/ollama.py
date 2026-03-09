@@ -8,9 +8,6 @@ from code_explore.models import Project
 
 logger = logging.getLogger(__name__)
 
-OLLAMA_BASE_URL = "http://localhost:11434"
-DEFAULT_MODEL = "llama3.2:3b"
-
 
 def _build_prompt(project: Project) -> str:
     parts = [f"Project: {project.name}"]
@@ -90,9 +87,16 @@ def _parse_response(text: str) -> tuple[str | None, list[str], list[str]]:
 
 def summarize_project(
     project: Project,
-    model: str = DEFAULT_MODEL,
-    base_url: str = OLLAMA_BASE_URL,
+    model: str | None = None,
+    base_url: str | None = None,
 ) -> tuple[str | None, list[str], list[str]]:
+    from code_explore.config import get_config
+
+    cfg = get_config()
+    if model is None:
+        model = cfg.summary_model
+    if base_url is None:
+        base_url = cfg.ollama_url
     prompt = _build_prompt(project)
 
     try:

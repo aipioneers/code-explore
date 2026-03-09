@@ -10,20 +10,22 @@ from code_explore.search.semantic import search as semantic_search
 
 logger = logging.getLogger(__name__)
 
-RRF_K = 60
-
 
 def _reciprocal_rank_fusion(
     fulltext_results: list[SearchResult],
     semantic_results: list[SearchResult],
 ) -> list[SearchResult]:
+    from code_explore.config import get_config
+
+    rrf_k = get_config().rrf_k
+
     scores: dict[str, float] = {}
     results_map: dict[str, SearchResult] = {}
     highlights_map: dict[str, list[str]] = {}
 
     for rank, result in enumerate(fulltext_results):
         pid = result.project.id
-        scores[pid] = scores.get(pid, 0.0) + 1.0 / (RRF_K + rank + 1)
+        scores[pid] = scores.get(pid, 0.0) + 1.0 / (rrf_k + rank + 1)
         if pid not in results_map:
             results_map[pid] = result
             highlights_map[pid] = list(result.highlights)
@@ -34,7 +36,7 @@ def _reciprocal_rank_fusion(
 
     for rank, result in enumerate(semantic_results):
         pid = result.project.id
-        scores[pid] = scores.get(pid, 0.0) + 1.0 / (RRF_K + rank + 1)
+        scores[pid] = scores.get(pid, 0.0) + 1.0 / (rrf_k + rank + 1)
         if pid not in results_map:
             results_map[pid] = result
             highlights_map[pid] = list(result.highlights)

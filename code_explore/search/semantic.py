@@ -7,7 +7,6 @@ import lancedb
 
 from code_explore.database import get_project
 from code_explore.indexer.embeddings import (
-    VECTOR_DB_PATH,
     TABLE_NAME,
     generate_embedding,
     _ollama_available,
@@ -30,12 +29,15 @@ def search(
         logger.warning("Failed to generate query embedding. Falling back to fulltext search.")
         return fulltext_search(query, limit=limit, db_path=db_path)
 
-    if not VECTOR_DB_PATH.exists():
+    from code_explore.config import get_config
+
+    vector_path = get_config().vector_path
+    if not vector_path.exists():
         logger.warning("Vector store not found. Falling back to fulltext search.")
         return fulltext_search(query, limit=limit, db_path=db_path)
 
     try:
-        db = lancedb.connect(str(VECTOR_DB_PATH))
+        db = lancedb.connect(str(vector_path))
         if TABLE_NAME not in db.table_names():
             logger.warning("Embeddings table not found. Falling back to fulltext search.")
             return fulltext_search(query, limit=limit, db_path=db_path)

@@ -11,38 +11,45 @@ from code_explore.models import Project
 
 logger = logging.getLogger(__name__)
 
-OLLAMA_BASE_URL = "http://localhost:11434"
-EMBEDDING_MODEL = "qwen3-embedding:8b"
-EMBEDDING_DIM = 4096
-VECTOR_DB_PATH = Path.home() / ".code-explore" / "vectors"
 TABLE_NAME = "project_embeddings"
 
-SCHEMA = pa.schema([
-    pa.field("id", pa.string()),
-    pa.field("text", pa.string()),
-    pa.field("vector", pa.list_(pa.float32(), EMBEDDING_DIM)),
-])
+
+def _get_schema() -> pa.Schema:
+    from code_explore.config import get_config
+
+    dim = get_config().embedding_dim
+    return pa.schema([
+        pa.field("id", pa.string()),
+        pa.field("text", pa.string()),
+        pa.field("vector", pa.list_(pa.float32(), dim)),
+    ])
 
 
 def _ollama_available() -> bool:
+    from code_explore.config import get_config
+
+    url = get_config().ollama_url
     try:
-        resp = httpx.get(f"{OLLAMA_BASE_URL}/api/tags", timeout=5.0)
+        resp = httpx.get(f"{url}/api/tags", timeout=5.0)
         return resp.status_code == 200
     except (httpx.ConnectError, httpx.TimeoutException):
         return False
 
 
 def generate_embedding(text: str) -> list[float] | None:
+    from code_explore.config import get_config
+
+    cfg = get_config()
     try:
         resp = httpx.post(
-            f"{OLLAMA_BASE_URL}/api/embeddings",
-            json={"model": EMBEDDING_MODEL, "prompt": text},
+            f"{cfg.ollama_url}/api/embeddings",
+            json={"model": cfg.embedding_model, "prompt": text},
             timeout=30.0,
         )
         resp.raise_for_status()
         return resp.json()["embedding"]
     except (httpx.ConnectError, httpx.TimeoutException):
-        logger.warning("Ollama is not running at %s. Skipping embedding generation.", OLLAMA_BASE_URL)
+        logger.warning("Ollama is not running at %s. Skipping embedding generation.", cfg.ollama_url)
         return None
     except (httpx.HTTPStatusError, KeyError) as e:
         logger.error("Failed to generate embedding: %s", e)
@@ -115,7 +122,7 @@ def _project_to_text(project: Project) -> str:
 def _get_table(db: lancedb.DBConnection) -> lancedb.table.Table:
     if TABLE_NAME in db.table_names():
         return db.open_table(TABLE_NAME)
-    return db.create_table(TABLE_NAME, schema=SCHEMA)
+    return db.create_table(TABLE_NAME, schema=_get_schema())
 
 
 def index_project(project: Project) -> None:
@@ -128,8 +135,11 @@ def index_project(project: Project) -> None:
     if vector is None:
         return
 
-    VECTOR_DB_PATH.mkdir(parents=True, exist_ok=True)
-    db = lancedb.connect(str(VECTOR_DB_PATH))
+    from code_explore.config import get_config
+
+    vector_path = get_config().vector_path
+    vector_path.mkdir(parents=True, exist_ok=True)
+    db = lancedb.connect(str(vector_path))
     table = _get_table(db)
 
     data = [{"id": project.id, "text": text, "vector": vector}]
@@ -164,8 +174,11 @@ def index_all_projects(projects: list[Project]) -> None:
         logger.warning("No embeddings generated. Skipping vector store update.")
         return
 
-    VECTOR_DB_PATH.mkdir(parents=True, exist_ok=True)
-    db = lancedb.connect(str(VECTOR_DB_PATH))
+    from code_explore.config import get_config
+
+    vector_path = get_config().vector_path
+    vector_path.mkdir(parents=True, exist_ok=True)
+    db = lancedb.connect(str(vector_path))
     table = _get_table(db)
 
     existing_ids = {item["id"] for item in data}

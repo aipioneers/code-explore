@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from code_explore.config import reset_config
 from code_explore.database import init_db, save_project, get_connection
 from code_explore.models import (
     DependencyInfo,
@@ -16,6 +17,14 @@ from code_explore.models import (
     ProjectStatus,
     QualityMetrics,
 )
+
+
+@pytest.fixture(autouse=True)
+def _reset_config_singleton():
+    """Reset the config singleton before each test to prevent leakage."""
+    reset_config()
+    yield
+    reset_config()
 
 
 @pytest.fixture
