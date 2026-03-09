@@ -6,11 +6,11 @@ from pathlib import Path
 
 from code_explore.models import Project
 
-DEFAULT_DB_PATH = Path.home() / ".code-explore" / "code-explore.db"
-
 
 def get_db_path() -> Path:
-    path = DEFAULT_DB_PATH
+    from code_explore.config import get_config
+
+    path = get_config().db_path
     path.parent.mkdir(parents=True, exist_ok=True)
     return path
 
