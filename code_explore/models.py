@@ -83,6 +83,10 @@ class Project(BaseModel):
     tags: list[str] = Field(default_factory=list)
     concepts: list[str] = Field(default_factory=list)
 
+    readme_snippet: str | None = None
+    key_files: list[str] = Field(default_factory=list)
+    git_head: str | None = None
+
     scanned_at: datetime | None = None
     analyzed_at: datetime | None = None
     indexed_at: datetime | None = None

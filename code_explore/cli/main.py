@@ -35,7 +35,8 @@ def scan(
 ) -> None:
     """Scan a local directory for git repositories and analyze them."""
     from code_explore.scanner.local import scan_local_repos
-    from code_explore.scanner.git_info import extract_git_info
+    from code_explore.scanner.git_info import extract_git_info, get_git_head
+    from code_explore.scanner.readme import read_readme, list_key_files
     from code_explore.analyzer.language import detect_languages
     from code_explore.analyzer.metrics import calculate_metrics
     from code_explore.analyzer.dependencies import detect_dependencies
@@ -73,9 +74,11 @@ def scan(
             if not force:
                 existing = get_project(pid)
                 if existing:
-                    progress.update(task, advance=1, description=f"[dim]Skipping {repo_path.name}[/dim]")
-                    results.append(existing)
-                    continue
+                    current_head = get_git_head(repo_path)
+                    if current_head and existing.git_head == current_head:
+                        progress.update(task, advance=1, description=f"[dim]Skipping {repo_path.name}[/dim]")
+                        results.append(existing)
+                        continue
 
             progress.update(task, advance=0, description=f"Analyzing [cyan]{repo_path.name}[/cyan]")
 
@@ -86,6 +89,9 @@ def scan(
             dependencies = detect_dependencies(repo_path)
             patterns, frameworks = detect_patterns(repo_path)
             git_info = extract_git_info(repo_path)
+            head_sha = get_git_head(repo_path)
+            readme_snippet = read_readme(repo_path)
+            key_file_list = list_key_files(repo_path)
 
             project = Project(
                 id=pid,
@@ -100,6 +106,9 @@ def scan(
                 patterns=patterns,
                 quality=quality,
                 git=git_info,
+                git_head=head_sha,
+                readme_snippet=readme_snippet,
+                key_files=key_file_list,
                 scanned_at=datetime.now(),
                 analyzed_at=datetime.now(),
             )
@@ -271,7 +280,9 @@ def show(
 
 
 @app.command()
-def index() -> None:
+def index(
+    model: str | None = typer.Option(None, "--model", "-m", help="Ollama model name for summarization"),
+) -> None:
     """Generate embeddings and AI summaries for all projects."""
     from code_explore.indexer.embeddings import index_project as embed_project, index_all_projects
     from code_explore.summarizer.ollama import summarize_project
@@ -298,7 +309,10 @@ def index() -> None:
         for project in projects:
             if not project.summary:
                 progress.update(summary_task, description=f"Summarizing [cyan]{project.name}[/cyan]")
-                summary, tags, concepts = summarize_project(project)
+                if model:
+                    summary, tags, concepts = summarize_project(project, model=model)
+                else:
+                    summary, tags, concepts = summarize_project(project)
                 if summary:
                     project.summary = summary
                     project.tags = tags
@@ -321,6 +335,136 @@ def index() -> None:
             progress.update(embed_task, advance=1)
 
     console.print(f"[green]Summarized {summarized} projects, indexed {indexed} projects.[/green]")
+
+
+@app.command()
+def update(
+    force: bool = typer.Option(False, "--force", "-f", help="Re-analyze even if git HEAD unchanged"),
+    reindex: bool = typer.Option(False, "--reindex", help="Regenerate embeddings for updated projects"),
+    resummarize: bool = typer.Option(False, "--resummarize", help="Regenerate AI summaries for updated projects"),
+) -> None:
+    """Update existing projects by re-analyzing changed repositories."""
+    from datetime import datetime
+
+    from code_explore.scanner.git_info import extract_git_info, get_git_head
+    from code_explore.scanner.readme import read_readme, list_key_files
+    from code_explore.analyzer.language import detect_languages
+    from code_explore.analyzer.metrics import calculate_metrics
+    from code_explore.analyzer.dependencies import detect_dependencies
+    from code_explore.analyzer.patterns import detect_patterns
+
+    init_db()
+    projects = get_all_projects()
+
+    if not projects:
+        console.print("[yellow]No projects found. Run 'scan' first.[/yellow]")
+        raise typer.Exit(0)
+
+    console.print(Panel(f"Updating [bold]{len(projects)}[/bold] projects", title="Code Explore Update"))
+
+    checked = 0
+    unchanged = 0
+    updated = 0
+    errors = 0
+    updated_projects: list[Project] = []
+
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        MofNCompleteColumn(),
+        console=console,
+    ) as progress:
+        task = progress.add_task("Checking projects...", total=len(projects))
+
+        for project in projects:
+            checked += 1
+
+            if not project.path:
+                progress.update(task, advance=1, description=f"[dim]No path for {project.name}[/dim]")
+                continue
+
+            repo_path = Path(project.path)
+
+            if not repo_path.is_dir():
+                progress.update(task, advance=1, description=f"[red]Missing: {project.name}[/red]")
+                errors += 1
+                continue
+
+            if not force:
+                current_head = get_git_head(repo_path)
+                if current_head and project.git_head == current_head:
+                    progress.update(task, advance=1, description=f"[dim]Unchanged: {project.name}[/dim]")
+                    unchanged += 1
+                    continue
+
+            progress.update(task, advance=0, description=f"Analyzing [cyan]{project.name}[/cyan]")
+
+            languages, primary_language = detect_languages(repo_path)
+            quality = calculate_metrics(repo_path)
+            dependencies = detect_dependencies(repo_path)
+            patterns, frameworks = detect_patterns(repo_path)
+            git_info = extract_git_info(repo_path)
+            head_sha = get_git_head(repo_path)
+            readme_snippet = read_readme(repo_path)
+            key_file_list = list_key_files(repo_path)
+
+            project.languages = languages
+            project.primary_language = primary_language
+            project.frameworks = frameworks
+            project.dependencies = dependencies
+            project.patterns = patterns
+            project.quality = quality
+            project.git = git_info
+            project.git_head = head_sha
+            project.readme_snippet = readme_snippet
+            project.key_files = key_file_list
+            project.status = ProjectStatus.ANALYZED
+            project.analyzed_at = datetime.now()
+
+            save_project(project)
+            updated_projects.append(project)
+            updated += 1
+            progress.update(task, advance=1)
+
+        if resummarize and updated_projects:
+            from code_explore.summarizer.ollama import summarize_project
+
+            summary_task = progress.add_task("Resummarizing...", total=len(updated_projects))
+            for project in updated_projects:
+                progress.update(summary_task, description=f"Summarizing [cyan]{project.name}[/cyan]")
+                project.summary = None
+                project.tags = []
+                project.concepts = []
+                summary, tags, concepts = summarize_project(project)
+                if summary:
+                    project.summary = summary
+                    project.tags = tags
+                    project.concepts = concepts
+                save_project(project)
+                progress.update(summary_task, advance=1)
+
+        if reindex and updated_projects:
+            from code_explore.indexer.embeddings import index_project as embed_project
+
+            embed_task = progress.add_task("Re-indexing...", total=len(updated_projects))
+            for project in updated_projects:
+                progress.update(embed_task, description=f"Embedding [cyan]{project.name}[/cyan]")
+                embed_project(project)
+                project.status = ProjectStatus.INDEXED
+                project.indexed_at = datetime.now()
+                save_project(project)
+                progress.update(embed_task, advance=1)
+
+    console.print()
+    console.print(Panel(
+        f"[bold]Checked:[/bold] {checked}\n"
+        f"[bold]Unchanged (skipped):[/bold] {unchanged}\n"
+        f"[bold]Updated:[/bold] {updated}\n"
+        f"[bold]Errors (missing path):[/bold] {errors}",
+        title="Update Summary",
+        border_style="green" if errors == 0 else "yellow",
+    ))
 
 
 @app.command()

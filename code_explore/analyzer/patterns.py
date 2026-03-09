@@ -113,8 +113,7 @@ PATTERN_RULES: list[_PatternRule] = [
                  content_files=["*.ts"]),
     _PatternRule("Next.js", "Framework",
                  file_patterns=["next.config.js", "next.config.mjs", "next.config.ts"],
-                 dir_patterns=["pages", "app"],
-                 content_patterns=[r"from ['\"]next|next/link|next/router|getServerSideProps"],
+                 content_patterns=[r"from ['\"]next|next/link|next/router|getServerSideProps|getStaticProps"],
                  content_files=["*.js", "*.jsx", "*.ts", "*.tsx"]),
     _PatternRule("FastAPI", "Framework",
                  content_patterns=[r"from fastapi|FastAPI\(|@app\.(get|post|put|delete)"],
@@ -135,9 +134,9 @@ PATTERN_RULES: list[_PatternRule] = [
                  content_patterns=[r"from flask|Flask\(__name__\)"],
                  content_files=["*.py"]),
     _PatternRule("Svelte", "Framework",
-                 file_patterns=[".svelte", "svelte.config.js"],
-                 content_patterns=[r"<script.*>|svelte"],
-                 content_files=["*.svelte"]),
+                 file_patterns=["svelte.config.js", "svelte.config.ts"],
+                 content_patterns=[r"from ['\"]svelte|import.*svelte"],
+                 content_files=["*.svelte", "*.js", "*.ts"]),
     _PatternRule("NestJS", "Framework",
                  file_patterns=["nest-cli.json"],
                  content_patterns=[r"@nestjs/|@Module|@Controller|@Injectable"],
@@ -187,25 +186,30 @@ PATTERN_RULES: list[_PatternRule] = [
                  content_patterns=[r"argparse|click|typer|commander|yargs|clap::"],
                  content_files=["*.py", "*.js", "*.ts", "*.rs"]),
     _PatternRule("Browser Extension", "Concept",
-                 file_patterns=["manifest.json"],
-                 content_patterns=[r"chrome\.runtime|browser\.runtime|content_scripts|background"],
-                 content_files=["manifest.json", "*.js", "*.ts"]),
+                 dir_patterns=["extension", "addon"],
+                 content_patterns=[r'"browser_action"', r'"content_scripts"',
+                                   r"chrome\.runtime", r"browser\.tabs",
+                                   r"chrome\.tabs", r"browser\.runtime"],
+                 content_files=["manifest.json"]),
     _PatternRule("Mobile App", "Concept",
-                 file_patterns=["app.json", "expo.json", "AndroidManifest.xml",
-                                "Info.plist", "pubspec.yaml"],
-                 dir_patterns=["ios", "android"],
-                 content_patterns=[r"react-native|expo|flutter|SwiftUI|UIKit"],
-                 content_files=["*.js", "*.ts", "*.dart", "*.swift", "*.kt"]),
+                 file_patterns=["Podfile", "pubspec.yaml", "AndroidManifest.xml",
+                                "*.swift", "*.kt", "*.dart"],
+                 dir_patterns=["ios", "android", "maui", "flutter"],
+                 content_patterns=[r"react-native", r"from ['\"]expo['\"]",
+                                   r"import\s+Flutter", r"SwiftUI",
+                                   r"UIApplicationDelegate"],
+                 content_files=["app.json", "*.js", "*.ts", "*.dart", "*.swift", "*.kt"]),
     _PatternRule("Testing", "Concept",
-                 file_patterns=["jest.config", "pytest.ini", "vitest.config", ".rspec",
-                                "karma.conf", "cypress.config"],
-                 dir_patterns=["tests", "test", "__tests__", "spec", "e2e", "cypress"],
-                 content_patterns=[r"describe\(|it\(|test\(|expect\(|assert|pytest|unittest"],
-                 content_files=["*.py", "*.js", "*.ts"]),
+                 file_patterns=["jest.config.js", "jest.config.ts", "jest.config.mjs",
+                                "pytest.ini", "pyproject.toml", "setup.cfg",
+                                "vitest.config.ts", "vitest.config.js",
+                                ".rspec", "karma.conf.js", "cypress.config.ts",
+                                "cypress.config.js"],
+                 dir_patterns=["e2e", "cypress", "__tests__"]),
     _PatternRule("Microservices", "Concept",
-                 dir_patterns=["services", "microservices"],
-                 content_patterns=[r"service-discovery|consul|eureka|api-gateway"],
-                 content_files=["*.yml", "*.yaml", "*.json"]),
+                 dir_patterns=["microservices"],
+                 content_patterns=[r"service-discovery|consul|eureka|api-gateway|service-mesh|istio"],
+                 content_files=["*.yml", "*.yaml", "*.json", "docker-compose*"]),
 ]
 
 FRAMEWORK_NAMES: set[str] = {
@@ -290,29 +294,65 @@ def detect_patterns(project_path: str | Path) -> tuple[list[PatternInfo], list[s
 
     for rule in PATTERN_RULES:
         evidence: list[str] = []
-        score = 0.0
+        file_hits = 0
+        dir_hits = 0
 
         for fp in rule.file_patterns:
-            if fp.startswith("."):
+            if fp.startswith("*."):
+                # Extension match (e.g. *.swift) — require exact suffix
+                ext = fp[1:]  # e.g. ".swift"
+                matches = [f for f in all_filenames if f.endswith(ext)]
+            elif fp.startswith("."):
                 matches = [f for f in all_filenames if f.endswith(fp)]
             else:
-                matches = [f for f in all_filenames if fp in f]
+                # Exact filename match only (no substring matching)
+                matches = [f for f in all_filenames if f == fp.lower()]
             if matches:
                 evidence.extend(matches[:3])
-                score += 0.4
+                file_hits += 1
 
         for dp in rule.dir_patterns:
             if dp in all_dirnames:
                 evidence.append(f"{dp}/")
-                score += 0.3
+                dir_hits += 1
 
         content_evidence = _search_content(files, rule, root)
         if content_evidence:
             evidence.extend(content_evidence[:5])
-            score += 0.3 + min(0.3, len(content_evidence) * 0.05)
 
         if not evidence:
             continue
+
+        # Require at least 2 different types of evidence to reduce false positives.
+        # Types: file matches, directory matches, content matches.
+        evidence_types = sum([
+            file_hits > 0,
+            dir_hits > 0,
+            len(content_evidence) > 0,
+        ])
+
+        # For most patterns, require at least 2 evidence types.
+        # Content-only patterns (those with no file/dir patterns defined) can
+        # match on content alone but need multiple content hits.
+        has_structural_rules = bool(rule.file_patterns or rule.dir_patterns)
+
+        if has_structural_rules and evidence_types < 2:
+            # Single evidence type is too weak for patterns that define
+            # structural rules — skip to avoid false positives.
+            continue
+
+        if not has_structural_rules and len(content_evidence) < 2:
+            # Content-only patterns need at least 2 file hits.
+            continue
+
+        # Calculate confidence based on accumulated evidence
+        score = 0.0
+        if file_hits:
+            score += min(0.35, file_hits * 0.15)
+        if dir_hits:
+            score += min(0.25, dir_hits * 0.15)
+        if content_evidence:
+            score += 0.2 + min(0.2, len(content_evidence) * 0.04)
 
         confidence = min(1.0, score)
         unique_evidence = list(dict.fromkeys(evidence))

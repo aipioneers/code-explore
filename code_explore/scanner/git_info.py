@@ -7,6 +7,16 @@ from git import InvalidGitRepositoryError, Repo
 from code_explore.models import GitInfo
 
 
+def get_git_head(repo_path: str | Path) -> str | None:
+    """Return the HEAD commit SHA for the repository, or None on error."""
+    repo_path = Path(repo_path).expanduser().resolve()
+    try:
+        repo = Repo(repo_path)
+        return repo.head.commit.hexsha
+    except (InvalidGitRepositoryError, ValueError, TypeError):
+        return None
+
+
 def extract_git_info(repo_path: str | Path) -> GitInfo:
     """Read git metadata from the repository at repo_path and return a GitInfo model."""
     repo_path = Path(repo_path).expanduser().resolve()

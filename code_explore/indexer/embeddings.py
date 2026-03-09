@@ -57,27 +57,57 @@ def _generate_embeddings_batch(texts: list[str]) -> list[list[float] | None]:
 
 
 def _project_to_text(project: Project) -> str:
-    parts = [project.name]
+    parts: list[str] = []
 
+    # Project name - repeated for weighting
+    parts.append(project.name)
+
+    # Name with summary for context
     if project.summary:
-        parts.append(project.summary)
+        parts.append(f"{project.name} - {project.summary}")
 
+    # README snippet - most valuable signal
+    if project.readme_snippet:
+        parts.append(f"README: {project.readme_snippet}")
+
+    # Summary standalone
+    if project.summary:
+        parts.append(f"Summary: {project.summary}")
+
+    # Dependency names (without versions) - critical for discovery
+    dep_names = [dep.name for dep in project.dependencies]
+    if dep_names:
+        parts.append(f"Dependencies: {', '.join(dep_names)}")
+
+    # Tags and concepts
     if project.tags:
         parts.append(f"Tags: {', '.join(project.tags)}")
 
     if project.concepts:
         parts.append(f"Concepts: {', '.join(project.concepts)}")
 
+    # Language names
     languages = [lang.name for lang in project.languages]
     if languages:
         parts.append(f"Languages: {', '.join(languages)}")
 
+    # Framework names
     if project.frameworks:
         parts.append(f"Frameworks: {', '.join(project.frameworks)}")
 
+    # Pattern names
     patterns = [p.name for p in project.patterns]
     if patterns:
         parts.append(f"Patterns: {', '.join(patterns)}")
+
+    # Key file names
+    if project.key_files:
+        parts.append(f"Files: {', '.join(project.key_files)}")
+
+    # Git remote URL contains useful project name info
+    remote = project.remote_url or (project.git.remote_url if project.git else None)
+    if remote:
+        parts.append(f"Remote: {remote}")
 
     return "\n".join(parts)
 

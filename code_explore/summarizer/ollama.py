@@ -9,14 +9,23 @@ from code_explore.models import Project
 logger = logging.getLogger(__name__)
 
 OLLAMA_BASE_URL = "http://localhost:11434"
-DEFAULT_MODEL = "llama3.2:3b"
+DEFAULT_MODEL = "qwen3.5:latest"
 
 
 def _build_prompt(project: Project) -> str:
     parts = [f"Project: {project.name}"]
 
+    if project.git.remote_url:
+        parts.append(f"Repository: {project.git.remote_url}")
+
+    if project.readme_snippet:
+        parts.append(f"\nREADME (excerpt):\n{project.readme_snippet}")
+
+    if project.key_files:
+        parts.append(f"\nKey files: {', '.join(project.key_files[:40])}")
+
     if project.primary_language:
-        parts.append(f"Primary language: {project.primary_language}")
+        parts.append(f"\nPrimary language: {project.primary_language}")
 
     languages = [lang.name for lang in project.languages]
     if languages:
@@ -31,35 +40,32 @@ def _build_prompt(project: Project) -> str:
 
     patterns = [p.name for p in project.patterns]
     if patterns:
-        parts.append(f"Patterns: {', '.join(patterns)}")
+        parts.append(f"Detected patterns: {', '.join(patterns)}")
 
     if project.quality.total_files:
-        parts.append(f"Total files: {project.quality.total_files}")
-        parts.append(f"Total lines: {project.quality.total_lines}")
-        parts.append(f"Has tests: {project.quality.has_tests}")
-        parts.append(f"Has CI: {project.quality.has_ci}")
-        parts.append(f"Has docs: {project.quality.has_docs}")
+        parts.append(f"Total files: {project.quality.total_files}, Total lines: {project.quality.total_lines}")
 
     if project.path:
         parts.append(f"Path: {project.path}")
 
-    if project.git.remote_url:
-        parts.append(f"Remote: {project.git.remote_url}")
-
     context = "\n".join(parts)
 
-    return f"""Analyze this software project and provide:
-1. A concise 2-3 sentence summary of what this project does and its purpose.
-2. A list of 5-10 relevant tags (single words or short phrases).
-3. A list of 3-5 key concepts or architectural themes.
+    return f"""You are analyzing a software project. Your job is to figure out WHAT this project actually does — its concrete purpose and functionality.
+
+RULES:
+- Focus on WHAT the project does, not what languages or technologies it uses.
+- Be SPECIFIC: mention the actual domain, functionality, or problem it solves.
+- NEVER say generic things like "utilizes various programming languages" or "a software project that uses modern technologies".
+- The summary must be exactly 2 sentences.
+- Tags should be domain-specific (e.g. "youtube-api", "video-download", "data-pipeline", "markdown-parser"), NOT generic (e.g. "javascript", "web", "coding").
 
 Project information:
 {context}
 
-Respond in exactly this format:
-SUMMARY: <your summary>
-TAGS: tag1, tag2, tag3, ...
-CONCEPTS: concept1, concept2, concept3, ..."""
+Respond in exactly this format (no extra lines):
+SUMMARY: <exactly 2 sentences about what this project concretely does>
+TAGS: tag1, tag2, tag3, ... (5-10 domain-specific tags)
+CONCEPTS: concept1, concept2, concept3, ... (3-5 architectural themes)"""
 
 
 def _parse_response(text: str) -> tuple[str | None, list[str], list[str]]:
@@ -98,7 +104,7 @@ def summarize_project(
                 "stream": False,
                 "options": {"temperature": 0.3, "num_predict": 512},
             },
-            timeout=60.0,
+            timeout=120.0,
         )
         resp.raise_for_status()
     except (httpx.ConnectError, httpx.TimeoutException):
