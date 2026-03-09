@@ -47,6 +47,15 @@ api = [
     "uvicorn>=0.23.0",
 ]
 
+dev = [
+    "pytest>=8.0.0",
+    "pytest-cov>=4.0.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
 [project.urls]
 Homepage = "https://github.com/aipioneers/code-explore"
 Repository = "https://github.com/aipioneers/code-explore"
