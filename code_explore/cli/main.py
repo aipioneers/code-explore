@@ -14,12 +14,14 @@ from rich.tree import Tree
 
 from code_explore.database import init_db, save_project, get_project, get_all_projects, get_project_count
 from code_explore.models import Project, ProjectSource, ProjectStatus
+from code_explore.cli.config_cmd import config_app
 
 app = typer.Typer(
     name="code-explore",
     help="Personal developer knowledge base - index, analyze and search all your projects.",
     no_args_is_help=True,
 )
+app.add_typer(config_app, name="config")
 console = Console()
 
 
@@ -142,9 +144,13 @@ def scan(
 def search(
     query: str = typer.Argument(..., help="Search query"),
     mode: str = typer.Option("hybrid", "--mode", "-m", help="Search mode: fulltext, semantic, or hybrid"),
-    limit: int = typer.Option(20, "--limit", "-l", help="Maximum results"),
+    limit: int = typer.Option(None, "--limit", "-l", help="Maximum results"),
 ) -> None:
     """Search across all indexed projects."""
+    from code_explore.config import get_config
+
+    if limit is None:
+        limit = get_config().result_limit
     init_db()
 
     if mode == "fulltext":
