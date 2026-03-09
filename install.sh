@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # code-explore installer
-# Usage: curl -fsSL https://get.code-explore.dev | bash
+# Usage: curl -fsSL https://code.pioneers.ai/install.sh | bash
 set -euo pipefail
 
 PACKAGE="code-explore"

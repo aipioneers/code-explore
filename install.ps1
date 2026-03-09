@@ -1,5 +1,5 @@
 # code-explore installer for Windows
-# Usage: irm https://get.code-explore.dev/install.ps1 | iex
+# Usage: irm https://code.pioneers.ai/install.ps1 | iex
 $ErrorActionPreference = "Stop"
 
 $Package = "code-explore"

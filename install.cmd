@@ -1,6 +1,6 @@
 @echo off
 REM code-explore installer for Windows CMD
-REM Usage: curl -fsSL https://get.code-explore.dev/install.cmd -o install.cmd && install.cmd && del install.cmd
+REM Usage: curl -fsSL https://code.pioneers.ai/install.cmd -o install.cmd && install.cmd && del install.cmd
 setlocal enabledelayedexpansion
 
 set "PACKAGE=code-explore"
