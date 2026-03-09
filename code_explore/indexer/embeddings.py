@@ -1,0 +1,151 @@
+"""Generate and store embeddings using Ollama + LanceDB."""
+
+import logging
+from pathlib import Path
+
+import httpx
+import lancedb
+import pyarrow as pa
+
+from code_explore.models import Project
+
+logger = logging.getLogger(__name__)
+
+OLLAMA_BASE_URL = "http://localhost:11434"
+EMBEDDING_MODEL = "nomic-embed-text"
+EMBEDDING_DIM = 768
+VECTOR_DB_PATH = Path.home() / ".code-explore" / "vectors"
+TABLE_NAME = "project_embeddings"
+
+SCHEMA = pa.schema([
+    pa.field("id", pa.string()),
+    pa.field("text", pa.string()),
+    pa.field("vector", pa.list_(pa.float32(), EMBEDDING_DIM)),
+])
+
+
+def _ollama_available() -> bool:
+    try:
+        resp = httpx.get(f"{OLLAMA_BASE_URL}/api/tags", timeout=5.0)
+        return resp.status_code == 200
+    except (httpx.ConnectError, httpx.TimeoutException):
+        return False
+
+
+def generate_embedding(text: str) -> list[float] | None:
+    try:
+        resp = httpx.post(
+            f"{OLLAMA_BASE_URL}/api/embeddings",
+            json={"model": EMBEDDING_MODEL, "prompt": text},
+            timeout=30.0,
+        )
+        resp.raise_for_status()
+        return resp.json()["embedding"]
+    except (httpx.ConnectError, httpx.TimeoutException):
+        logger.warning("Ollama is not running at %s. Skipping embedding generation.", OLLAMA_BASE_URL)
+        return None
+    except (httpx.HTTPStatusError, KeyError) as e:
+        logger.error("Failed to generate embedding: %s", e)
+        return None
+
+
+def _generate_embeddings_batch(texts: list[str]) -> list[list[float] | None]:
+    results = []
+    for text in texts:
+        results.append(generate_embedding(text))
+    return results
+
+
+def _project_to_text(project: Project) -> str:
+    parts = [project.name]
+
+    if project.summary:
+        parts.append(project.summary)
+
+    if project.tags:
+        parts.append(f"Tags: {', '.join(project.tags)}")
+
+    if project.concepts:
+        parts.append(f"Concepts: {', '.join(project.concepts)}")
+
+    languages = [lang.name for lang in project.languages]
+    if languages:
+        parts.append(f"Languages: {', '.join(languages)}")
+
+    if project.frameworks:
+        parts.append(f"Frameworks: {', '.join(project.frameworks)}")
+
+    patterns = [p.name for p in project.patterns]
+    if patterns:
+        parts.append(f"Patterns: {', '.join(patterns)}")
+
+    return "\n".join(parts)
+
+
+def _get_table(db: lancedb.DBConnection) -> lancedb.table.Table:
+    if TABLE_NAME in db.table_names():
+        return db.open_table(TABLE_NAME)
+    return db.create_table(TABLE_NAME, schema=SCHEMA)
+
+
+def index_project(project: Project) -> None:
+    if not _ollama_available():
+        logger.warning("Ollama is not available. Skipping indexing for project '%s'.", project.name)
+        return
+
+    text = _project_to_text(project)
+    vector = generate_embedding(text)
+    if vector is None:
+        return
+
+    VECTOR_DB_PATH.mkdir(parents=True, exist_ok=True)
+    db = lancedb.connect(str(VECTOR_DB_PATH))
+    table = _get_table(db)
+
+    data = [{"id": project.id, "text": text, "vector": vector}]
+
+    existing = table.search().where(f"id = '{project.id}'", prefilter=True).limit(1).to_list()
+    if existing:
+        table.delete(f"id = '{project.id}'")
+
+    table.add(data)
+    logger.info("Indexed project '%s' in vector store.", project.name)
+
+
+def index_all_projects(projects: list[Project]) -> None:
+    if not projects:
+        return
+
+    if not _ollama_available():
+        logger.warning(
+            "Ollama is not available. Skipping vector indexing for %d projects.", len(projects)
+        )
+        return
+
+    texts = [_project_to_text(p) for p in projects]
+    vectors = _generate_embeddings_batch(texts)
+
+    data = []
+    for project, text, vector in zip(projects, texts, vectors):
+        if vector is not None:
+            data.append({"id": project.id, "text": text, "vector": vector})
+
+    if not data:
+        logger.warning("No embeddings generated. Skipping vector store update.")
+        return
+
+    VECTOR_DB_PATH.mkdir(parents=True, exist_ok=True)
+    db = lancedb.connect(str(VECTOR_DB_PATH))
+    table = _get_table(db)
+
+    existing_ids = {item["id"] for item in data}
+    for pid in existing_ids:
+        try:
+            found = table.search().where(f"id = '{pid}'", prefilter=True).limit(1).to_list()
+            if found:
+                table.delete(f"id = '{pid}'")
+        except Exception:
+            pass
+
+    table.add(data)
+    logger.info("Indexed %d/%d projects in vector store.", len(data), len(projects))

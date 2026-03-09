@@ -1,0 +1,38 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "code-explore"
+version = "0.1.0"
+description = "Personal developer knowledge base - index, analyze and search all your projects"
+requires-python = ">=3.11"
+dependencies = [
+    "typer>=0.9.0",
+    "rich>=13.0.0",
+    "fastapi>=0.104.0",
+    "uvicorn>=0.24.0",
+    "sqlalchemy>=2.0.0",
+    "pydantic>=2.0.0",
+    "pydantic-settings>=2.0.0",
+    "lancedb>=0.4.0",
+    "ollama>=0.1.0",
+    "gitpython>=3.1.0",
+    "pygments>=2.17.0",
+    "httpx>=0.25.0",
+    "pyarrow>=14.0.0",
+]
+
+[project.scripts]
+code-explore = "code_explore.cli.main:app"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.23.0",
+    "ruff>=0.1.0",
+]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
