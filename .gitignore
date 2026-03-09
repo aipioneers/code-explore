@@ -104,5 +104,17 @@ publish/
 logs/
 *.log
 
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.egg
+dist/
+build/
+.eggs/
+*.whl
+.venv/
+venv/
+
 # Misc
 BenchmarkDotNet.Artifacts/
