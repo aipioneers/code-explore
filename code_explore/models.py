@@ -20,6 +20,18 @@ class ProjectStatus(str, Enum):
     ERROR = "error"
 
 
+class TagCategory(str, Enum):
+    DOMAIN = "domain"
+    TECHNOLOGY_ROLE = "technology-role"
+    MATURITY = "maturity"
+
+
+class AiTag(BaseModel):
+    value: str
+    category: TagCategory = TagCategory.DOMAIN
+    confidence: float = 0.8
+
+
 class LanguageInfo(BaseModel):
     name: str
     files: int = 0
@@ -82,6 +94,7 @@ class Project(BaseModel):
     summary: str | None = None
     tags: list[str] = Field(default_factory=list)
     concepts: list[str] = Field(default_factory=list)
+    ai_tags: list[AiTag] = Field(default_factory=list)
 
     readme_snippet: str | None = None
     key_files: list[str] = Field(default_factory=list)
@@ -104,3 +117,15 @@ class SearchQuery(BaseModel):
     mode: str = "hybrid"
     limit: int = 20
     filters: dict = Field(default_factory=dict)
+    language: str | None = None
+    framework: str | None = None
+    pattern: str | None = None
+    tag: str | None = None
+
+
+class SearchFacets(BaseModel):
+    languages: dict[str, int] = Field(default_factory=dict)
+    frameworks: dict[str, int] = Field(default_factory=dict)
+    patterns: dict[str, int] = Field(default_factory=dict)
+    tags: dict[str, int] = Field(default_factory=dict)
+    total: int = 0

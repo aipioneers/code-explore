@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Code Explore — Dashboard</title>
+    <meta name="description" content="Browse, search, and explore your indexed projects">
+    <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+    <header class="header">
+        <a href="#/" class="logo">
+            <span class="logo-icon">&#9670;</span>
+            <span>Code Explore</span>
+        </a>
+        <nav class="nav">
+            <a href="#/" class="nav-link" data-view="overview">Overview</a>
+            <a href="#/search" class="nav-link" data-view="search">Search</a>
+        </nav>
+    </header>
+
+    <main class="main">
+        <!-- Overview View -->
+        <div id="view-overview" class="view">
+            <div class="stats-grid" id="stats-grid"></div>
+            <div class="section">
+                <h2>AI Tag Cloud</h2>
+                <div id="tag-cloud" class="tag-cloud"></div>
+            </div>
+            <div class="section">
+                <h2>Projects</h2>
+                <div id="project-list" class="project-grid"></div>
+            </div>
+        </div>
+
+        <!-- Search View -->
+        <div id="view-search" class="view hidden">
+            <div class="search-bar">
+                <input type="text" id="search-input" placeholder="Search projects..." autocomplete="off">
+                <div class="search-controls">
+                    <select id="mode-select" title="Search mode">
+                        <option value="hybrid">Hybrid</option>
+                        <option value="fulltext">Fulltext</option>
+                        <option value="semantic">Semantic</option>
+                    </select>
+                    <select id="filter-language" title="Filter by language">
+                        <option value="">All Languages</option>
+                    </select>
+                    <select id="filter-framework" title="Filter by framework">
+                        <option value="">All Frameworks</option>
+                    </select>
+                    <select id="filter-pattern" title="Filter by pattern">
+                        <option value="">All Patterns</option>
+                    </select>
+                    <select id="filter-tag" title="Filter by AI tag">
+                        <option value="">All Tags</option>
+                    </select>
+                </div>
+            </div>
+            <div id="search-status" class="search-status"></div>
+            <div id="search-results" class="project-grid"></div>
+        </div>
+
+        <!-- Detail View -->
+        <div id="view-detail" class="view hidden">
+            <button id="back-btn" class="back-btn">&larr; Back</button>
+            <div id="project-detail"></div>
+        </div>
+    </main>
+
+    <footer class="footer">
+        <span>Code Explore v0.3.0</span>
+        <a href="https://github.com/aipioneers/code-explore" target="_blank" rel="noopener">GitHub</a>
+    </footer>
+
+    <script src="/app.js"></script>
+</body>
+</html>

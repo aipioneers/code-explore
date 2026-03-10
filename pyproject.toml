@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "code-explore"
-version = "0.2.0"
+version = "0.3.0"
 description = "Developer knowledge base CLI — scan, index, and search your programming projects"
 readme = "README.md"
 license = "MIT"
@@ -53,6 +53,12 @@ dev = [
     "pytest>=8.0.0",
     "pytest-cov>=4.0.0",
 ]
+
+[tool.hatch.build.targets.wheel]
+packages = ["code_explore"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"code_explore/static" = "code_explore/static"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

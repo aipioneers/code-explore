@@ -110,7 +110,10 @@ def init_db(db_path: Path | None = None) -> None:
 def save_project(project: Project, db_path: Path | None = None) -> None:
     conn = get_connection(db_path)
     now = datetime.now().isoformat()
-    tags_str = ", ".join(project.tags) if project.tags else ""
+    tag_parts = list(project.tags) if project.tags else []
+    if project.ai_tags:
+        tag_parts.extend(t.value for t in project.ai_tags)
+    tags_str = ", ".join(tag_parts)
 
     readme_str = (project.readme_snippet or "")[:2000]
 

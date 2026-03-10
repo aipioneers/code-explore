@@ -93,6 +93,11 @@ def _project_to_text(project: Project) -> str:
     if project.concepts:
         parts.append(f"Concepts: {', '.join(project.concepts)}")
 
+    # AI classification tags
+    if project.ai_tags:
+        ai_tag_values = [t.value for t in project.ai_tags]
+        parts.append(f"AI Tags: {', '.join(ai_tag_values)}")
+
     # Language names
     languages = [lang.name for lang in project.languages]
     if languages:

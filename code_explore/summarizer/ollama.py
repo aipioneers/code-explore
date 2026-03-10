@@ -4,7 +4,7 @@ import logging
 
 import httpx
 
-from code_explore.models import Project
+from code_explore.models import AiTag, Project
 
 logger = logging.getLogger(__name__)
 
@@ -62,13 +62,21 @@ Project information:
 Respond in exactly this format (no extra lines):
 SUMMARY: <exactly 2 sentences about what this project concretely does>
 TAGS: tag1, tag2, tag3, ... (5-10 domain-specific tags)
-CONCEPTS: concept1, concept2, concept3, ... (3-5 architectural themes)"""
+CONCEPTS: concept1, concept2, concept3, ... (3-5 architectural themes)
+AI_TAGS: category:tag, ... (5-10 classification tags in these categories)
+  - domain: what the project does (e.g. domain:web-backend, domain:data-pipeline, domain:cli-tool, domain:devops-tooling, domain:machine-learning)
+  - role: what technical role it plays (e.g. role:api-gateway, role:orm-layer, role:task-runner, role:auth-provider, role:build-tool)
+  - maturity: project maturity level (e.g. maturity:production-ready, maturity:prototype, maturity:beta, maturity:experimental)
+Use lowercase-hyphenated values. Include 2-4 domain tags, 1-3 role tags, and 1 maturity tag."""
 
 
-def _parse_response(text: str) -> tuple[str | None, list[str], list[str]]:
+def _parse_response(text: str) -> tuple[str | None, list[str], list[str], list[AiTag]]:
+    from code_explore.tagger import parse_ai_tags
+
     summary = None
     tags: list[str] = []
     concepts: list[str] = []
+    ai_tags: list[AiTag] = []
 
     for line in text.strip().split("\n"):
         line = line.strip()
@@ -81,15 +89,18 @@ def _parse_response(text: str) -> tuple[str | None, list[str], list[str]]:
         elif upper.startswith("CONCEPTS:"):
             raw = line[len("CONCEPTS:"):].strip()
             concepts = [c.strip() for c in raw.split(",") if c.strip()]
+        elif upper.startswith("AI_TAGS:"):
+            raw = line[len("AI_TAGS:"):].strip()
+            ai_tags = parse_ai_tags(raw)
 
-    return summary, tags, concepts
+    return summary, tags, concepts, ai_tags
 
 
 def summarize_project(
     project: Project,
     model: str | None = None,
     base_url: str | None = None,
-) -> tuple[str | None, list[str], list[str]]:
+) -> tuple[str | None, list[str], list[str], list[AiTag]]:
     from code_explore.config import get_config
 
     cfg = get_config()
@@ -113,22 +124,22 @@ def summarize_project(
         resp.raise_for_status()
     except (httpx.ConnectError, httpx.TimeoutException):
         logger.warning("Ollama is not running at %s. Skipping summarization.", base_url)
-        return None, [], []
+        return None, [], [], []
     except httpx.HTTPStatusError as e:
         logger.error("Ollama request failed: %s", e)
-        return None, [], []
+        return None, [], [], []
 
     try:
         response_text = resp.json()["response"]
     except (KeyError, ValueError):
         logger.error("Unexpected Ollama response format.")
-        return None, [], []
+        return None, [], [], []
 
-    summary, tags, concepts = _parse_response(response_text)
+    summary, tags, concepts, ai_tags = _parse_response(response_text)
 
     if summary:
         logger.info("Generated summary for project '%s'.", project.name)
     else:
         logger.warning("Failed to parse summary from Ollama response for '%s'.", project.name)
 
-    return summary, tags, concepts
+    return summary, tags, concepts, ai_tags

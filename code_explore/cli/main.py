@@ -145,9 +145,14 @@ def search(
     query: str = typer.Argument(..., help="Search query"),
     mode: str = typer.Option("hybrid", "--mode", "-m", help="Search mode: fulltext, semantic, or hybrid"),
     limit: int = typer.Option(None, "--limit", "-l", help="Maximum results"),
+    language: str = typer.Option(None, "--language", "-L", help="Filter by primary language"),
+    framework: str = typer.Option(None, "--framework", "-F", help="Filter by framework"),
+    pattern: str = typer.Option(None, "--pattern", help="Filter by architectural pattern"),
+    tag: str = typer.Option(None, "--tag", "-t", help="Filter by AI-generated tag"),
 ) -> None:
     """Search across all indexed projects."""
     from code_explore.config import get_config
+    from code_explore.search.filters import apply_filters
 
     if limit is None:
         limit = get_config().result_limit
@@ -162,6 +167,23 @@ def search(
     else:
         from code_explore.search.hybrid import search as hybrid_search
         results = hybrid_search(query, limit=limit)
+
+    # Apply post-filters
+    results = apply_filters(results, language=language, framework=framework, pattern=pattern, tag=tag)
+
+    # Show active filters
+    active_filters = []
+    if language:
+        active_filters.append(f"language={language}")
+    if framework:
+        active_filters.append(f"framework={framework}")
+    if pattern:
+        active_filters.append(f"pattern={pattern}")
+    if tag:
+        active_filters.append(f"tag={tag}")
+
+    if active_filters:
+        console.print(f"[dim]Filters: {', '.join(active_filters)}[/dim]")
 
     if not results:
         console.print(f"[yellow]No results found for:[/yellow] {query}")
@@ -282,6 +304,16 @@ def show(
     if project.concepts:
         tree.add(f"[bold]Concepts:[/bold] {', '.join(project.concepts)}")
 
+    # AI Tags grouped by category
+    if project.ai_tags:
+        ai_branch = tree.add("[bold]AI Tags[/bold]")
+        by_category: dict[str, list[str]] = {}
+        for t in project.ai_tags:
+            cat = t.category.value if hasattr(t.category, "value") else str(t.category)
+            by_category.setdefault(cat, []).append(t.value)
+        for cat, values in sorted(by_category.items()):
+            ai_branch.add(f"[magenta]{cat}:[/magenta] {', '.join(values)}")
+
     console.print(Panel(tree, title=f"Project: {project.name}", border_style="cyan"))
 
 
@@ -309,22 +341,30 @@ def index(
         MofNCompleteColumn(),
         console=console,
     ) as progress:
-        summary_task = progress.add_task("Generating summaries...", total=len(projects))
+        summary_task = progress.add_task("Generating summaries & AI tags...", total=len(projects))
         summarized = 0
+        tagged = 0
 
         for project in projects:
-            if not project.summary:
+            needs_summary = not project.summary
+            needs_tags = not project.ai_tags
+
+            if needs_summary or needs_tags:
                 progress.update(summary_task, description=f"Summarizing [cyan]{project.name}[/cyan]")
                 if model:
-                    summary, tags, concepts = summarize_project(project, model=model)
+                    summary, tags, concepts, ai_tags = summarize_project(project, model=model)
                 else:
-                    summary, tags, concepts = summarize_project(project)
-                if summary:
+                    summary, tags, concepts, ai_tags = summarize_project(project)
+                if summary and needs_summary:
                     project.summary = summary
                     project.tags = tags
                     project.concepts = concepts
-                    save_project(project)
                     summarized += 1
+                if ai_tags:
+                    project.ai_tags = ai_tags
+                    tagged += 1
+                if summary or ai_tags:
+                    save_project(project)
             progress.update(summary_task, advance=1)
 
         embed_task = progress.add_task("Generating embeddings...", total=len(projects))
@@ -340,7 +380,62 @@ def index(
             indexed += 1
             progress.update(embed_task, advance=1)
 
-    console.print(f"[green]Summarized {summarized} projects, indexed {indexed} projects.[/green]")
+    console.print(f"[green]Summarized {summarized}, AI-tagged {tagged}, indexed {indexed} projects.[/green]")
+
+
+@app.command()
+def tags(
+    category: str = typer.Option(None, "--category", "-c", help="Filter by category: domain, technology-role, maturity"),
+) -> None:
+    """List all unique AI tags across projects with counts."""
+    init_db()
+    projects = get_all_projects()
+
+    if not projects:
+        console.print("[yellow]No projects found. Run 'scan' first.[/yellow]")
+        raise typer.Exit(0)
+
+    # Collect all AI tags with counts
+    tag_counts: Counter[str] = Counter()
+    tag_categories: dict[str, str] = {}
+
+    for p in projects:
+        for t in p.ai_tags:
+            cat = t.category.value if hasattr(t.category, "value") else str(t.category)
+            if category and cat != category:
+                continue
+            tag_counts[t.value] += 1
+            tag_categories[t.value] = cat
+
+    if not tag_counts:
+        if category:
+            console.print(f"[yellow]No AI tags found for category '{category}'.[/yellow]")
+        else:
+            console.print("[yellow]No AI tags found. Run 'cex index' to generate tags.[/yellow]")
+        raise typer.Exit(0)
+
+    # Group by category
+    by_category: dict[str, list[tuple[str, int]]] = {}
+    for tag_value, count in tag_counts.most_common():
+        cat = tag_categories[tag_value]
+        by_category.setdefault(cat, []).append((tag_value, count))
+
+    total_tags = len(tag_counts)
+    total_projects = len(projects)
+    console.print(Panel(
+        f"[bold]{total_tags}[/bold] unique AI tags across [bold]{total_projects}[/bold] projects",
+        title="AI Tags",
+        border_style="magenta",
+    ))
+
+    for cat in sorted(by_category.keys()):
+        items = by_category[cat]
+        table = Table(title=f"{cat} tags")
+        table.add_column("Tag", style="magenta")
+        table.add_column("Projects", justify="right", style="yellow")
+        for tag_value, count in items:
+            table.add_row(tag_value, str(count))
+        console.print(table)
 
 
 @app.command()
@@ -348,6 +443,7 @@ def update(
     force: bool = typer.Option(False, "--force", "-f", help="Re-analyze even if git HEAD unchanged"),
     reindex: bool = typer.Option(False, "--reindex", help="Regenerate embeddings for updated projects"),
     resummarize: bool = typer.Option(False, "--resummarize", help="Regenerate AI summaries for updated projects"),
+    retag: bool = typer.Option(False, "--retag", help="Regenerate AI tags for updated projects"),
 ) -> None:
     """Update existing projects by re-analyzing changed repositories."""
     from datetime import datetime
@@ -433,20 +529,25 @@ def update(
             updated += 1
             progress.update(task, advance=1)
 
-        if resummarize and updated_projects:
+        if (resummarize or retag) and updated_projects:
             from code_explore.summarizer.ollama import summarize_project
 
             summary_task = progress.add_task("Resummarizing...", total=len(updated_projects))
             for project in updated_projects:
                 progress.update(summary_task, description=f"Summarizing [cyan]{project.name}[/cyan]")
-                project.summary = None
-                project.tags = []
-                project.concepts = []
-                summary, tags, concepts = summarize_project(project)
-                if summary:
+                if resummarize:
+                    project.summary = None
+                    project.tags = []
+                    project.concepts = []
+                if retag:
+                    project.ai_tags = []
+                summary, tags, concepts, ai_tags = summarize_project(project)
+                if summary and resummarize:
                     project.summary = summary
                     project.tags = tags
                     project.concepts = concepts
+                if ai_tags and retag:
+                    project.ai_tags = ai_tags
                 save_project(project)
                 progress.update(summary_task, advance=1)
 
@@ -547,12 +648,13 @@ def serve(
     host: str = typer.Option("0.0.0.0", "--host", "-h", help="Bind host"),
     port: int = typer.Option(8000, "--port", "-p", help="Bind port"),
 ) -> None:
-    """Start the FastAPI server."""
+    """Start the FastAPI server with web dashboard."""
     import uvicorn
 
     init_db()
     console.print(Panel(
         f"Starting server on [bold cyan]http://{host}:{port}[/bold cyan]\n"
+        f"Dashboard at [bold cyan]http://{host}:{port}[/bold cyan]\n"
         f"API docs at [bold cyan]http://{host}:{port}/docs[/bold cyan]",
         title="Code Explore API",
     ))
