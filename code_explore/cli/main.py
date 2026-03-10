@@ -34,8 +34,11 @@ def scan(
     path: str = typer.Argument(..., help="Root directory to scan for repositories"),
     depth: int = typer.Option(4, "--depth", "-d", help="Maximum directory depth"),
     force: bool = typer.Option(False, "--force", "-f", help="Re-scan existing projects"),
+    no_ai: bool = typer.Option(False, "--no-ai", help="Skip AI summaries and tags (requires Ollama)"),
+    no_embed: bool = typer.Option(False, "--no-embed", help="Skip vector embeddings"),
+    model: str | None = typer.Option(None, "--model", "-m", help="Ollama model name"),
 ) -> None:
-    """Scan a local directory for git repositories and analyze them."""
+    """Scan repositories, analyze, summarize, and index — all in one step."""
     from code_explore.scanner.local import scan_local_repos
     from code_explore.scanner.git_info import extract_git_info, get_git_head
     from code_explore.scanner.readme import read_readme, list_key_files
@@ -51,7 +54,16 @@ def scan(
         console.print(f"[red]Error:[/red] Path does not exist: {root}")
         raise typer.Exit(1)
 
-    console.print(Panel(f"Scanning [bold cyan]{root}[/bold cyan] (depth={depth})", title="Code Explore"))
+    steps = ["scan", "analyze"]
+    if not no_ai:
+        steps.append("summarize + tag")
+    if not no_embed:
+        steps.append("embed")
+    console.print(Panel(
+        f"Scanning [bold cyan]{root}[/bold cyan] (depth={depth})\n"
+        f"Steps: {' → '.join(steps)}",
+        title="Code Explore",
+    ))
 
     repos = asyncio.run(scan_local_repos(root, max_depth=depth))
 
@@ -60,6 +72,7 @@ def scan(
         raise typer.Exit(0)
 
     results: list[Project] = []
+    new_or_changed: list[Project] = []
 
     with Progress(
         SpinnerColumn(),
@@ -68,6 +81,7 @@ def scan(
         MofNCompleteColumn(),
         console=console,
     ) as progress:
+        # Phase 1: Scan & analyze
         task = progress.add_task("Analyzing repositories...", total=len(repos))
 
         for repo_path in repos:
@@ -117,7 +131,54 @@ def scan(
 
             save_project(project)
             results.append(project)
+            new_or_changed.append(project)
             progress.update(task, advance=1)
+
+        # Phase 2: AI summaries & tags (all projects that need them)
+        if not no_ai:
+            from code_explore.summarizer.ollama import summarize_project
+
+            ai_candidates = [p for p in results if not p.summary or not p.ai_tags]
+            if ai_candidates:
+                ai_task = progress.add_task("AI summaries & tags...", total=len(ai_candidates))
+                summarized = 0
+                tagged = 0
+
+                for project in ai_candidates:
+                    progress.update(ai_task, description=f"Summarizing [cyan]{project.name}[/cyan]")
+                    needs_summary = not project.summary
+                    needs_tags = not project.ai_tags
+
+                    if model:
+                        summary, tags, concepts, ai_tags = summarize_project(project, model=model)
+                    else:
+                        summary, tags, concepts, ai_tags = summarize_project(project)
+
+                    if summary and needs_summary:
+                        project.summary = summary
+                        project.tags = tags
+                        project.concepts = concepts
+                        summarized += 1
+                    if ai_tags and needs_tags:
+                        project.ai_tags = ai_tags
+                        tagged += 1
+                    if summary or ai_tags:
+                        save_project(project)
+                    progress.update(ai_task, advance=1)
+
+        # Phase 3: Embeddings (all projects)
+        if not no_embed:
+            from code_explore.indexer.embeddings import index_project as embed_project
+            from datetime import datetime
+
+            embed_task = progress.add_task("Generating embeddings...", total=len(results))
+            for project in results:
+                progress.update(embed_task, description=f"Embedding [cyan]{project.name}[/cyan]")
+                embed_project(project)
+                project.status = ProjectStatus.INDEXED
+                project.indexed_at = datetime.now()
+                save_project(project)
+                progress.update(embed_task, advance=1)
 
     table = Table(title=f"Scanned {len(results)} Projects")
     table.add_column("Name", style="cyan", no_wrap=True)
@@ -321,7 +382,7 @@ def show(
 def index(
     model: str | None = typer.Option(None, "--model", "-m", help="Ollama model name for summarization"),
 ) -> None:
-    """Generate embeddings and AI summaries for all projects."""
+    """Re-generate AI summaries and embeddings for existing projects."""
     from code_explore.indexer.embeddings import index_project as embed_project, index_all_projects
     from code_explore.summarizer.ollama import summarize_project
 

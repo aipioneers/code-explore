@@ -1,4 +1,4 @@
-/* Code Explore Dashboard — v0.3.0 */
+/* Code Explore Dashboard — v0.4.0 */
 
 const API = {
     async get(path) {

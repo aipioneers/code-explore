@@ -14,7 +14,7 @@ from code_explore.database import init_db, save_project, get_project, get_all_pr
 from code_explore.models import Project, ProjectSource, ProjectStatus, SearchFacets
 from code_explore.search.filters import apply_filters, filter_projects, compute_facets
 
-app = FastAPI(title="Code Explore", version="0.3.0", description="Developer knowledge base API")
+app = FastAPI(title="Code Explore", version="0.4.0", description="Developer knowledge base API")
 
 app.add_middleware(
     CORSMiddleware,
