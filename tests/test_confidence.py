@@ -24,10 +24,8 @@ class TestComputeConfidence:
         """Result at rank 0 in both lists should get confidence near 1.0."""
         conf = _compute_confidence(
             pid="a",
-            fulltext_ids={"a"},
-            semantic_ids={"a"},
-            fulltext_ranks={"a": 0},
-            semantic_ranks={"a": 0},
+            source_ids=[{"a"}, {"a"}],
+            source_ranks=[{"a": 0}, {"a": 0}],
             total_results=10,
         )
         assert conf >= 0.9
@@ -37,10 +35,8 @@ class TestComputeConfidence:
         """Result at the bottom of both lists should get ~0.7 (base, no rank bonus)."""
         conf = _compute_confidence(
             pid="a",
-            fulltext_ids={"a"},
-            semantic_ids={"a"},
-            fulltext_ranks={"a": 10},
-            semantic_ranks={"a": 10},
+            source_ids=[{"a"}, {"a"}],
+            source_ranks=[{"a": 10}, {"a": 10}],
             total_results=10,
         )
         assert 0.65 <= conf <= 0.75
@@ -49,10 +45,8 @@ class TestComputeConfidence:
         """Result only in fulltext should get around 0.5-0.7."""
         conf = _compute_confidence(
             pid="a",
-            fulltext_ids={"a"},
-            semantic_ids=set(),
-            fulltext_ranks={"a": 0},
-            semantic_ranks={},
+            source_ids=[{"a"}, set()],
+            source_ranks=[{"a": 0}, {}],
             total_results=10,
         )
         assert conf >= _SINGLE_SOURCE_CONFIDENCE
@@ -62,10 +56,8 @@ class TestComputeConfidence:
         """Result only in semantic should get around 0.5-0.7."""
         conf = _compute_confidence(
             pid="b",
-            fulltext_ids=set(),
-            semantic_ids={"b"},
-            fulltext_ranks={},
-            semantic_ranks={"b": 0},
+            source_ids=[set(), {"b"}],
+            source_ranks=[{}, {"b": 0}],
             total_results=10,
         )
         assert conf >= _SINGLE_SOURCE_CONFIDENCE
@@ -75,10 +67,8 @@ class TestComputeConfidence:
         """Single-source result at low rank should be near 0.5."""
         conf = _compute_confidence(
             pid="a",
-            fulltext_ids={"a"},
-            semantic_ids=set(),
-            fulltext_ranks={"a": 10},
-            semantic_ranks={},
+            source_ids=[{"a"}, set()],
+            source_ranks=[{"a": 10}, {}],
             total_results=10,
         )
         assert abs(conf - _SINGLE_SOURCE_CONFIDENCE) < 0.05
@@ -89,14 +79,24 @@ class TestComputeConfidence:
             for rank in range(total + 1):
                 # Both sources
                 c = _compute_confidence(
-                    "x", {"x"}, {"x"}, {"x": rank}, {"x": rank}, total
+                    "x", [{"x"}, {"x"}], [{"x": rank}, {"x": rank}], total
                 )
                 assert 0.0 <= c <= 1.0
                 # Single source
                 c = _compute_confidence(
-                    "x", {"x"}, set(), {"x": rank}, {}, total
+                    "x", [{"x"}, set()], [{"x": rank}, {}], total
                 )
                 assert 0.0 <= c <= 1.0
+
+    def test_three_sources_high_confidence(self):
+        """Result in all three sources should get high confidence."""
+        conf = _compute_confidence(
+            pid="a",
+            source_ids=[{"a"}, {"a"}, {"a"}],
+            source_ranks=[{"a": 0}, {"a": 0}, {"a": 0}],
+            total_results=10,
+        )
+        assert conf >= 0.9
 
 
 class TestConfidenceInRRF:

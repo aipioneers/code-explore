@@ -1,4 +1,4 @@
-"""Hybrid search combining fulltext and semantic search with reciprocal rank fusion."""
+"""Hybrid search combining fulltext, semantic, and pattern search with reciprocal rank fusion."""
 
 import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -6,6 +6,7 @@ from pathlib import Path
 
 from code_explore.models import SearchResult
 from code_explore.search.fulltext import search as fulltext_search
+from code_explore.search.pattern_search import search_by_patterns
 from code_explore.search.semantic import search as semantic_search
 
 logger = logging.getLogger(__name__)
@@ -13,51 +14,56 @@ logger = logging.getLogger(__name__)
 # Confidence when a result appears in only one search source.
 _SINGLE_SOURCE_CONFIDENCE = 0.5
 
-# Maximum confidence when both sources agree (rank-weighted).
+# Maximum confidence when multiple sources agree (rank-weighted).
 _BOTH_SOURCES_MAX = 1.0
 
 
 def _compute_confidence(
     pid: str,
-    fulltext_ids: set[str],
-    semantic_ids: set[str],
-    fulltext_ranks: dict[str, int],
-    semantic_ranks: dict[str, int],
+    source_ids: list[set[str]],
+    source_ranks: list[dict[str, int]],
     total_results: int,
 ) -> float:
     """Score confidence 0.0-1.0 based on agreement between search sources.
 
-    Higher when both fulltext and semantic return the result, especially at
-    high ranks.  Lower when only one source matched.
-    """
-    in_fulltext = pid in fulltext_ids
-    in_semantic = pid in semantic_ids
+    Higher when more sources return the result, especially at high ranks.
+    Lower when only one source matched.
 
-    if in_fulltext and in_semantic:
-        # Both sources agree -- base confidence starts at 0.7.
-        # Bonus up to 0.3 based on how high the result ranks in each list.
-        ft_rank = fulltext_ranks.get(pid, total_results)
-        sem_rank = semantic_ranks.get(pid, total_results)
-        avg_rank = (ft_rank + sem_rank) / 2.0
-        # Normalise: rank 0 -> bonus 0.3, rank >= total_results -> bonus 0.0
+    ``source_ids`` and ``source_ranks`` are parallel lists — one entry per
+    search source (fulltext, semantic, pattern).
+    """
+    present_count = sum(1 for ids in source_ids if pid in ids)
+
+    if present_count >= 2:
+        # Multiple sources agree — base confidence starts at 0.7.
+        # Bonus up to 0.3 based on average rank across matching sources.
+        ranks = [
+            sr.get(pid, total_results)
+            for sr, ids in zip(source_ranks, source_ids)
+            if pid in ids
+        ]
+        avg_rank = sum(ranks) / len(ranks) if ranks else float(total_results)
         denom = max(total_results, 1)
         rank_bonus = 0.3 * max(0.0, 1.0 - avg_rank / denom)
         return min(_BOTH_SOURCES_MAX, 0.7 + rank_bonus)
 
     # Only one source matched.
-    if in_fulltext:
-        rank = fulltext_ranks.get(pid, total_results)
+    for sr, ids in zip(source_ranks, source_ids):
+        if pid in ids:
+            rank = sr.get(pid, total_results)
+            break
     else:
-        rank = semantic_ranks.get(pid, total_results)
+        rank = total_results
+
     denom = max(total_results, 1)
     rank_bonus = 0.2 * max(0.0, 1.0 - rank / denom)
     return _SINGLE_SOURCE_CONFIDENCE + rank_bonus
 
 
 def _reciprocal_rank_fusion(
-    fulltext_results: list[SearchResult],
-    semantic_results: list[SearchResult],
+    *result_lists: list[SearchResult],
 ) -> list[SearchResult]:
+    """Fuse an arbitrary number of ranked result lists using RRF."""
     from code_explore.config import get_config
 
     rrf_k = get_config().rrf_k
@@ -66,46 +72,36 @@ def _reciprocal_rank_fusion(
     results_map: dict[str, SearchResult] = {}
     highlights_map: dict[str, list[str]] = {}
 
-    fulltext_ids: set[str] = set()
-    semantic_ids: set[str] = set()
-    fulltext_ranks: dict[str, int] = {}
-    semantic_ranks: dict[str, int] = {}
+    # Per-source id sets and rank maps (parallel lists).
+    source_ids: list[set[str]] = []
+    source_ranks: list[dict[str, int]] = []
 
-    for rank, result in enumerate(fulltext_results):
-        pid = result.project.id
-        fulltext_ids.add(pid)
-        fulltext_ranks.setdefault(pid, rank)
-        scores[pid] = scores.get(pid, 0.0) + 1.0 / (rrf_k + rank + 1)
-        if pid not in results_map:
-            results_map[pid] = result
-            highlights_map[pid] = list(result.highlights)
-        else:
-            for h in result.highlights:
-                if h not in highlights_map[pid]:
-                    highlights_map[pid].append(h)
+    for result_list in result_lists:
+        ids: set[str] = set()
+        ranks: dict[str, int] = {}
+        for rank, result in enumerate(result_list):
+            pid = result.project.id
+            ids.add(pid)
+            ranks.setdefault(pid, rank)
+            scores[pid] = scores.get(pid, 0.0) + 1.0 / (rrf_k + rank + 1)
+            if pid not in results_map:
+                results_map[pid] = result
+                highlights_map[pid] = list(result.highlights)
+            else:
+                for h in result.highlights:
+                    if h not in highlights_map[pid]:
+                        highlights_map[pid].append(h)
+        source_ids.append(ids)
+        source_ranks.append(ranks)
 
-    for rank, result in enumerate(semantic_results):
-        pid = result.project.id
-        semantic_ids.add(pid)
-        semantic_ranks.setdefault(pid, rank)
-        scores[pid] = scores.get(pid, 0.0) + 1.0 / (rrf_k + rank + 1)
-        if pid not in results_map:
-            results_map[pid] = result
-            highlights_map[pid] = list(result.highlights)
-        else:
-            for h in result.highlights:
-                if h not in highlights_map[pid]:
-                    highlights_map[pid].append(h)
-
-    total_results = max(len(fulltext_results), len(semantic_results))
+    total_results = max((len(rl) for rl in result_lists), default=0)
     ranked = sorted(scores.items(), key=lambda x: x[1], reverse=True)
 
     merged = []
     for pid, score in ranked:
         base = results_map[pid]
         confidence = _compute_confidence(
-            pid, fulltext_ids, semantic_ids,
-            fulltext_ranks, semantic_ranks, total_results,
+            pid, source_ids, source_ranks, total_results,
         )
         merged.append(
             SearchResult(
@@ -125,32 +121,37 @@ def search(
 ) -> list[SearchResult]:
     fulltext_results: list[SearchResult] = []
     semantic_results: list[SearchResult] = []
+    pattern_results: list[SearchResult] = []
 
-    with ThreadPoolExecutor(max_workers=2) as executor:
+    with ThreadPoolExecutor(max_workers=3) as executor:
         ft_future = executor.submit(fulltext_search, query, limit=limit, db_path=db_path)
         sem_future = executor.submit(semantic_search, query, limit=limit, db_path=db_path)
+        pat_future = executor.submit(search_by_patterns, query, limit=limit, db_path=db_path)
 
-        for future in as_completed([ft_future, sem_future]):
+        for future in as_completed([ft_future, sem_future, pat_future]):
             try:
                 if future is ft_future:
                     fulltext_results = future.result()
-                else:
+                elif future is sem_future:
                     semantic_results = future.result()
+                else:
+                    pattern_results = future.result()
             except Exception as e:
                 logger.error("Search component failed: %s", e)
 
-    if not semantic_results and fulltext_results:
-        for r in fulltext_results:
-            r.confidence = _SINGLE_SOURCE_CONFIDENCE
-        return fulltext_results[:limit]
+    # Collect all non-empty result lists.
+    available: list[list[SearchResult]] = [
+        rl for rl in [fulltext_results, semantic_results, pattern_results] if rl
+    ]
 
-    if not fulltext_results and semantic_results:
-        for r in semantic_results:
-            r.confidence = _SINGLE_SOURCE_CONFIDENCE
-        return semantic_results[:limit]
-
-    if not fulltext_results and not semantic_results:
+    if not available:
         return []
 
-    merged = _reciprocal_rank_fusion(fulltext_results, semantic_results)
+    if len(available) == 1:
+        results = available[0]
+        for r in results:
+            r.confidence = _SINGLE_SOURCE_CONFIDENCE
+        return results[:limit]
+
+    merged = _reciprocal_rank_fusion(*available)
     return merged[:limit]
