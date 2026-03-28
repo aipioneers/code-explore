@@ -110,6 +110,7 @@ class SearchResult(BaseModel):
     score: float
     match_type: str
     highlights: list[str] = Field(default_factory=list)
+    confidence: float = 0.0
 
 
 class SearchQuery(BaseModel):
