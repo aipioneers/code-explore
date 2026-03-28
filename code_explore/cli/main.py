@@ -36,6 +36,7 @@ def scan(
     force: bool = typer.Option(False, "--force", "-f", help="Re-scan existing projects"),
     no_ai: bool = typer.Option(False, "--no-ai", help="Skip AI summaries and tags (requires Ollama)"),
     no_embed: bool = typer.Option(False, "--no-embed", help="Skip vector embeddings"),
+    no_sync: bool = typer.Option(False, "--no-sync", help="Skip auto-sync to cloud after scan"),
     model: str | None = typer.Option(None, "--model", "-m", help="Ollama model name"),
 ) -> None:
     """Scan repositories, analyze, summarize, and index — all in one step."""
@@ -199,6 +200,91 @@ def scan(
         )
 
     console.print(table)
+
+    # Phase 4: Run installed plugins against each scanned project
+    from code_explore.plugins.loader import list_installed as _list_plugins
+    installed_plugins = _list_plugins()
+    if installed_plugins:
+        from code_explore.plugins.runner import run_all_plugins as _run_all_plugins
+
+        console.print(
+            f"\n[dim]Running {len(installed_plugins)} plugin(s) on "
+            f"{len(results)} project(s)...[/dim]"
+        )
+        all_plugin_results: list[dict] = []
+        for project in results:
+            project_data = {
+                "name": project.name,
+                "languages": {
+                    lang.name: lang.percentage for lang in project.languages
+                },
+                "dependencies": [d.name for d in project.dependencies],
+                "tags": list(project.tags),
+                "scan_id": project.id,
+            }
+            pr = _run_all_plugins(project.path or "", project_data)
+            all_plugin_results.extend(pr)
+
+        # Show per-plugin status summary
+        if all_plugin_results:
+            plugin_table = Table(title="Plugin Results")
+            plugin_table.add_column("Plugin", style="cyan", no_wrap=True)
+            plugin_table.add_column("Version", style="dim")
+            plugin_table.add_column("Status", style="bold")
+            plugin_table.add_column("Items", justify="right", style="yellow")
+            plugin_table.add_column("Errors", style="red")
+            for pr_item in all_plugin_results:
+                status_str = pr_item.get("status", "unknown")
+                status_style = {
+                    "success": "[green]success[/green]",
+                    "error": "[red]error[/red]",
+                    "timeout": "[yellow]timeout[/yellow]",
+                }.get(status_str, status_str)
+                err_text = "; ".join(pr_item.get("errors", []))[:60]
+                plugin_table.add_row(
+                    pr_item.get("plugin_name", "?"),
+                    pr_item.get("plugin_version", "?"),
+                    status_style,
+                    str(len(pr_item.get("results", []))),
+                    err_text or "-",
+                )
+            console.print(plugin_table)
+
+    # Auto-sync to cloud if enabled
+    if not no_sync:
+        try:
+            from pioneers_cli.cloud import require_cloud, sync_project, CloudError
+            api_url, token = require_cloud()
+            console.print(f"\n[dim]Syncing {len(results)} project(s) to cloud...[/dim]")
+            synced = 0
+            for project in results:
+                lang_dict = {lang.name: lang.percentage for lang in project.languages}
+                dep_list = [d.name for d in project.dependencies]
+                pat_list = [p.name for p in project.patterns]
+                all_tags = list(project.tags)
+                if project.ai_tags:
+                    all_tags.extend(t.value for t in project.ai_tags if t.value not in all_tags)
+                try:
+                    sync_project(
+                        api_url, token,
+                        name=project.name,
+                        path=project.path or "",
+                        remote_url=project.git.remote_url,
+                        languages=lang_dict,
+                        dependencies=dep_list,
+                        patterns=pat_list,
+                        summary=project.summary,
+                        tags=all_tags,
+                        readme_snippet=project.readme_snippet,
+                    )
+                    synced += 1
+                except Exception:
+                    pass
+            console.print(f"[green]Synced {synced}/{len(results)} project(s) to the cloud.[/green]")
+        except ImportError:
+            pass  # pioneers-cli not installed, skip auto-sync
+        except Exception:
+            pass  # Cloud not configured, skip silently
 
 
 @app.command()
@@ -472,7 +558,7 @@ def tags(
         if category:
             console.print(f"[yellow]No AI tags found for category '{category}'.[/yellow]")
         else:
-            console.print("[yellow]No AI tags found. Run 'cex index' to generate tags.[/yellow]")
+            console.print("[yellow]No AI tags found. Run 'cexp index' to generate tags.[/yellow]")
         raise typer.Exit(0)
 
     # Group by category
@@ -705,6 +791,99 @@ def stats() -> None:
 
 
 @app.command()
+def sync(
+    force: bool = typer.Option(False, "--force", "-f", help="Sync all projects even if unchanged"),
+) -> None:
+    """Sync local projects to the Pioneers cloud."""
+    init_db()
+    projects = get_all_projects()
+
+    if not projects:
+        console.print("[yellow]No projects found. Run 'scan' first.[/yellow]")
+        raise typer.Exit(0)
+
+    # Import cloud client — works with or without pioneers-cli installed
+    try:
+        from pioneers_cli.cloud import require_cloud, sync_project, CloudError
+    except ImportError:
+        # Fallback: inline cloud sync using ~/.pioneers/ files directly
+        console.print("[red]pioneers-cli is not installed.[/red]")
+        console.print("Install it: [bold]pip install pioneers-cli[/bold]")
+        raise typer.Exit(1)
+
+    try:
+        api_url, token = require_cloud()
+    except CloudError as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(1)
+
+    console.print(Panel(
+        f"Syncing [bold]{len(projects)}[/bold] projects to [cyan]{api_url}[/cyan]",
+        title="Cloud Sync",
+    ))
+
+    synced = 0
+    errors = 0
+
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        MofNCompleteColumn(),
+        console=console,
+    ) as progress:
+        task = progress.add_task("Syncing...", total=len(projects))
+
+        for project in projects:
+            progress.update(task, description=f"Syncing [cyan]{project.name}[/cyan]")
+
+            # Convert languages: list[LanguageInfo] → dict[str, float]
+            lang_dict = {}
+            for lang in project.languages:
+                lang_dict[lang.name] = lang.percentage
+
+            # Convert dependencies: list[DependencyInfo] → list[str]
+            dep_list = [d.name for d in project.dependencies]
+
+            # Convert patterns: list[PatternInfo] → list[str]
+            pat_list = [p.name for p in project.patterns]
+
+            # Merge tags
+            all_tags = list(project.tags)
+            if project.ai_tags:
+                all_tags.extend(t.value for t in project.ai_tags if t.value not in all_tags)
+
+            try:
+                sync_project(
+                    api_url, token,
+                    name=project.name,
+                    path=project.path or "",
+                    remote_url=project.git.remote_url,
+                    languages=lang_dict,
+                    dependencies=dep_list,
+                    patterns=pat_list,
+                    summary=project.summary,
+                    tags=all_tags,
+                    readme_snippet=project.readme_snippet,
+                )
+                synced += 1
+            except CloudError as e:
+                console.print(f"\n[red]Error syncing {project.name}: {e}[/red]")
+                errors += 1
+            except Exception as e:
+                console.print(f"\n[red]Failed to sync {project.name}: {e}[/red]")
+                errors += 1
+
+            progress.update(task, advance=1)
+
+    console.print()
+    if errors == 0:
+        console.print(f"[green]Synced {synced} project(s) to the cloud.[/green]")
+    else:
+        console.print(f"[yellow]Synced {synced}, failed {errors} project(s).[/yellow]")
+
+
+@app.command()
 def serve(
     host: str = typer.Option("0.0.0.0", "--host", "-h", help="Bind host"),
     port: int = typer.Option(8000, "--port", "-p", help="Bind port"),
@@ -720,6 +899,387 @@ def serve(
         title="Code Explore API",
     ))
     uvicorn.run("code_explore.api.main:app", host=host, port=port, reload=False)
+
+
+# ---------------------------------------------------------------------------
+# Plugin sub-commands  (T056-T059)
+# ---------------------------------------------------------------------------
+
+plugin_app = typer.Typer(
+    name="plugin",
+    help="Manage Code Explore plugins — search, install, list, remove, publish.",
+    no_args_is_help=True,
+)
+app.add_typer(plugin_app, name="plugin")
+
+# Cloud helper — pioneers-cli is optional
+_cloud_available = True
+try:
+    from pioneers_cli.cloud import require_cloud as _require_cloud, CloudError as _CloudError
+except ImportError:
+    _cloud_available = False
+
+    class _CloudError(Exception):  # type: ignore[no-redef]
+        pass
+
+    def _require_cloud() -> tuple[str, str]:  # type: ignore[misc]
+        raise _CloudError(
+            "pioneers-cli is not installed. Install it: pip install pioneers-cli"
+        )
+
+
+def _cloud_or_exit() -> tuple[str, str]:
+    """Return (api_url, token) or print error and exit."""
+    try:
+        return _require_cloud()
+    except _CloudError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+
+
+@plugin_app.command("search")
+def plugin_search(
+    query: str = typer.Argument(..., help="Search query for plugins"),
+) -> None:
+    """Search the Pioneers plugin marketplace."""
+    import httpx
+
+    api_url, token = _cloud_or_exit()
+
+    try:
+        resp = httpx.get(
+            f"{api_url}/api/plugins",
+            params={"q": query},
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=15,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+    except httpx.HTTPStatusError as exc:
+        console.print(f"[red]API error ({exc.response.status_code}):[/red] {exc.response.text[:200]}")
+        raise typer.Exit(1) from exc
+    except httpx.RequestError as exc:
+        console.print(f"[red]Connection error:[/red] {exc}")
+        raise typer.Exit(1) from exc
+
+    plugins = data if isinstance(data, list) else data.get("plugins", data.get("results", []))
+
+    if not plugins:
+        console.print(f"[yellow]No plugins found for '{query}'.[/yellow]")
+        raise typer.Exit(0)
+
+    table = Table(title=f"Plugin Search: '{query}'")
+    table.add_column("Name", style="cyan", no_wrap=True)
+    table.add_column("Version", style="dim")
+    table.add_column("Rating", justify="right", style="yellow")
+    table.add_column("Installs", justify="right", style="green")
+    table.add_column("Price", style="magenta")
+
+    for p in plugins:
+        table.add_row(
+            p.get("name", "?"),
+            p.get("version", "?"),
+            str(p.get("rating", "-")),
+            str(p.get("installs", "-")),
+            p.get("price", "free"),
+        )
+
+    console.print(table)
+
+
+@plugin_app.command("install")
+def plugin_install(
+    name: str = typer.Argument(..., help="Plugin name to install"),
+) -> None:
+    """Install a plugin from the Pioneers marketplace."""
+    import tempfile
+    import httpx
+
+    from code_explore.plugins.loader import install_from_tarball, PLUGIN_DIR
+
+    api_url, token = _cloud_or_exit()
+
+    # Step 1: POST to acquire install info / download URL
+    console.print(f"[dim]Requesting plugin '{name}' from marketplace...[/dim]")
+    try:
+        resp = httpx.post(
+            f"{api_url}/api/plugins/{name}/install",
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=15,
+        )
+        resp.raise_for_status()
+        install_info = resp.json()
+    except httpx.HTTPStatusError as exc:
+        detail = ""
+        try:
+            detail = exc.response.json().get("detail", exc.response.text[:200])
+        except Exception:
+            detail = exc.response.text[:200]
+        console.print(f"[red]Install failed ({exc.response.status_code}):[/red] {detail}")
+        raise typer.Exit(1) from exc
+    except httpx.RequestError as exc:
+        console.print(f"[red]Connection error:[/red] {exc}")
+        raise typer.Exit(1) from exc
+
+    download_url = install_info.get("download_url")
+    if not download_url:
+        console.print("[red]Marketplace did not return a download URL.[/red]")
+        raise typer.Exit(1)
+
+    # Step 2: Download the tarball
+    console.print(f"[dim]Downloading {download_url}...[/dim]")
+    try:
+        dl_resp = httpx.get(download_url, follow_redirects=True, timeout=60)
+        dl_resp.raise_for_status()
+    except httpx.RequestError as exc:
+        console.print(f"[red]Download error:[/red] {exc}")
+        raise typer.Exit(1) from exc
+
+    with tempfile.NamedTemporaryFile(suffix=".tar.gz", delete=False) as tmp:
+        tmp.write(dl_resp.content)
+        tarball_path = Path(tmp.name)
+
+    # Step 3: Extract into plugin dir
+    try:
+        install_from_tarball(tarball_path, name)
+    except Exception as exc:
+        console.print(f"[red]Extraction failed:[/red] {exc}")
+        raise typer.Exit(1) from exc
+    finally:
+        tarball_path.unlink(missing_ok=True)
+
+    console.print(f"[green]Plugin '{name}' installed to {PLUGIN_DIR / name}[/green]")
+
+
+@plugin_app.command("list")
+def plugin_list() -> None:
+    """List locally installed plugins."""
+    from code_explore.plugins.loader import list_installed
+
+    plugins = list_installed()
+
+    if not plugins:
+        console.print("[yellow]No plugins installed.[/yellow]")
+        console.print("[dim]Install one: cexp plugin install <name>[/dim]")
+        raise typer.Exit(0)
+
+    table = Table(title="Installed Plugins")
+    table.add_column("Name", style="cyan", no_wrap=True)
+    table.add_column("Version", style="dim")
+    table.add_column("Entry", style="green")
+    table.add_column("Description", style="white", max_width=50)
+
+    for p in plugins:
+        table.add_row(
+            p.get("name", "?"),
+            p.get("version", "?"),
+            p.get("entry", "?"),
+            (p.get("description") or "-")[:50],
+        )
+
+    console.print(table)
+
+
+@plugin_app.command("remove")
+def plugin_remove(
+    name: str = typer.Argument(..., help="Plugin name to remove"),
+) -> None:
+    """Remove a locally installed plugin."""
+    from code_explore.plugins.loader import remove_plugin
+
+    if remove_plugin(name):
+        console.print(f"[green]Plugin '{name}' removed.[/green]")
+    else:
+        console.print(f"[yellow]Plugin '{name}' is not installed.[/yellow]")
+        raise typer.Exit(1)
+
+
+@plugin_app.command("publish")
+def plugin_publish() -> None:
+    """Publish the plugin in the current directory to the Pioneers marketplace."""
+    import io
+    import json
+    import tarfile
+    import httpx
+
+    from code_explore.plugins.contract import validate_plugin_json
+
+    api_url, token = _cloud_or_exit()
+
+    # Read and validate plugin.json in cwd
+    manifest_path = Path.cwd() / "plugin.json"
+    if not manifest_path.is_file():
+        console.print("[red]No plugin.json found in the current directory.[/red]")
+        raise typer.Exit(1)
+
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        console.print(f"[red]Invalid plugin.json:[/red] {exc}")
+        raise typer.Exit(1) from exc
+
+    errors = validate_plugin_json(manifest)
+    if errors:
+        console.print("[red]plugin.json validation errors:[/red]")
+        for err in errors:
+            console.print(f"  - {err}")
+        raise typer.Exit(1)
+
+    plugin_name = manifest["name"]
+    plugin_version = manifest["version"]
+
+    console.print(
+        f"Publishing [bold cyan]{plugin_name}[/bold cyan] "
+        f"v{plugin_version}..."
+    )
+
+    # Create in-memory tarball of cwd
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w:gz") as tar:
+        cwd = Path.cwd()
+        for item in cwd.rglob("*"):
+            # Skip hidden dirs (.git, etc.) and __pycache__
+            rel = item.relative_to(cwd)
+            parts = rel.parts
+            if any(part.startswith(".") or part == "__pycache__" for part in parts):
+                continue
+            if item.is_file():
+                tar.add(str(item), arcname=str(rel))
+    buf.seek(0)
+
+    # Upload: multipart with metadata JSON + tarball
+    try:
+        resp = httpx.post(
+            f"{api_url}/api/plugins",
+            headers={"Authorization": f"Bearer {token}"},
+            files={
+                "metadata": ("plugin.json", json.dumps(manifest).encode(), "application/json"),
+                "tarball": (f"{plugin_name}-{plugin_version}.tar.gz", buf, "application/gzip"),
+            },
+            timeout=60,
+        )
+        resp.raise_for_status()
+    except httpx.HTTPStatusError as exc:
+        detail = ""
+        try:
+            detail = exc.response.json().get("detail", exc.response.text[:200])
+        except Exception:
+            detail = exc.response.text[:200]
+        console.print(f"[red]Publish failed ({exc.response.status_code}):[/red] {detail}")
+        raise typer.Exit(1) from exc
+    except httpx.RequestError as exc:
+        console.print(f"[red]Connection error:[/red] {exc}")
+        raise typer.Exit(1) from exc
+
+    console.print(f"[green]Plugin '{plugin_name}' v{plugin_version} published successfully![/green]")
+
+
+@app.command()
+def ask(
+    question: str = typer.Argument(..., help="Question about your codebase"),
+    cloud: bool = typer.Option(False, "--cloud", help="Use cloud AI (requires API token)"),
+    project: str | None = typer.Option(None, "--project", "-p", help="Project ID to scope the question"),
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+) -> None:
+    """Ask a question about your indexed codebase using AI."""
+    import json
+    import os
+
+    from code_explore.ai.ask import (
+        ask_cloud as _ask_cloud,
+        ask_local as _ask_local,
+        check_local_quota,
+        increment_local_quota,
+    )
+
+    init_db()
+
+    if cloud:
+        # --- Cloud mode ---
+        token = os.environ.get("PIONEERS_TOKEN", "")
+        api_url = os.environ.get("PIONEERS_API_URL", "https://api.pioneers.ai")
+
+        if not token:
+            console.print(
+                "[red]Error:[/red] Set PIONEERS_TOKEN environment variable to use cloud AI."
+            )
+            raise typer.Exit(1)
+
+        console.print("[dim]Querying Pioneers cloud AI...[/dim]")
+        try:
+            result = asyncio.run(
+                _ask_cloud(question, api_url=api_url, token=token, project_id=project)
+            )
+        except Exception as exc:
+            console.print(f"[red]Cloud AI error:[/red] {exc}")
+            raise typer.Exit(1) from exc
+    else:
+        # --- Local mode ---
+        allowed, used, limit = check_local_quota()
+        if not allowed:
+            console.print(
+                f"[yellow]Daily quota reached ({used}/{limit}).[/yellow]\n"
+                "Use [bold]--cloud[/bold] with a paid plan for unlimited queries, "
+                "or wait until tomorrow."
+            )
+            raise typer.Exit(1)
+
+        console.print("[dim]Searching local knowledge base...[/dim]")
+        result = asyncio.run(_ask_local(question))
+        increment_local_quota()
+
+    # --- Output ---
+    if json_output:
+        console.print_json(json.dumps(result))
+        return
+
+    answer = result.get("answer", "No answer available.")
+    references = result.get("references", [])
+    confidence = result.get("confidence", "unknown")
+
+    console.print()
+    console.print(Panel(
+        answer,
+        title="Answer",
+        subtitle=f"confidence: {confidence}",
+        border_style="cyan",
+    ))
+
+    if references:
+        ref_table = Table(title="References")
+        ref_table.add_column("File / Project", style="cyan")
+        ref_table.add_column("Relevance", justify="right", style="yellow")
+
+        for ref in references:
+            rel = ref.get("relevance", 0)
+            ref_table.add_row(ref.get("file", "?"), f"{rel:.0%}")
+
+        console.print(ref_table)
+
+    # --- Citations (local mode only — cloud responses lack project data) ---
+    matched_projects = result.get("projects", [])
+    if matched_projects:
+        from code_explore.search.citations import extract_citations
+
+        citations = extract_citations(question, matched_projects)
+        if citations:
+            cit_table = Table(title="Citations")
+            cit_table.add_column("Project", style="cyan")
+            cit_table.add_column("Chunk", style="white", max_width=80)
+            cit_table.add_column("Relevance", justify="right", style="yellow")
+
+            for cit in citations:
+                cit_table.add_row(
+                    cit.source_file,
+                    cit.chunk,
+                    f"{cit.relevance:.0%}",
+                )
+
+            console.print(cit_table)
+
+    if not cloud:
+        allowed, used, limit = check_local_quota()
+        console.print(f"[dim]Local quota: {used}/{limit} questions used today[/dim]")
 
 
 if __name__ == "__main__":
