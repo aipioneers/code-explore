@@ -7,6 +7,7 @@ from pathlib import Path
 from code_explore.models import SearchResult
 from code_explore.search.fulltext import search as fulltext_search
 from code_explore.search.pattern_search import search_by_patterns
+from code_explore.search.reranker import rerank
 from code_explore.search.semantic import search as semantic_search
 
 logger = logging.getLogger(__name__)
@@ -151,7 +152,7 @@ def search(
         results = available[0]
         for r in results:
             r.confidence = _SINGLE_SOURCE_CONFIDENCE
-        return results[:limit]
+        return rerank(results[:limit], query)
 
     merged = _reciprocal_rank_fusion(*available)
-    return merged[:limit]
+    return rerank(merged[:limit], query)
