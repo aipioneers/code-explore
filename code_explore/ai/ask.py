@@ -144,7 +144,7 @@ async def ask_cloud(
 ) -> dict:
     """Forward a question to the Pioneers cloud AI endpoint.
 
-    POST {api_url}/api/ai/ask with the question payload and return
+    POST {api_url}/ai/ask with the question payload and return
     the response JSON as-is.
     """
     payload: dict = {"question": question}
@@ -155,7 +155,7 @@ async def ask_cloud(
 
     async with httpx.AsyncClient(timeout=30) as client:
         resp = await client.post(
-            f"{api_url}/api/ai/ask",
+            f"{api_url}/ai/ask",
             json=payload,
             headers={"Authorization": f"Bearer {token}"},
         )

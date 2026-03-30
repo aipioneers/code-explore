@@ -297,13 +297,13 @@ def scan(
                         readme_snippet=project.readme_snippet,
                     )
                     synced += 1
-                except Exception:
-                    pass
+                except Exception as e:
+                    console.print(f"[red]  ✗ {project.name}: {e}[/red]")
             console.print(f"[green]Synced {synced}/{len(results)} project(s) to the cloud.[/green]")
         except ImportError:
-            pass  # pioneers-cli not installed, skip auto-sync
-        except Exception:
-            pass  # Cloud not configured, skip silently
+            console.print("\n[dim]Cloud sync skipped (pioneers-cli not installed).[/dim]")
+        except Exception as exc:
+            console.print(f"\n[yellow]Cloud sync skipped: {exc}[/yellow]")
 
 
 @app.command()
