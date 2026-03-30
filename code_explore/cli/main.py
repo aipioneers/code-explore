@@ -37,6 +37,7 @@ def scan(
     no_ai: bool = typer.Option(False, "--no-ai", help="Skip AI summaries and tags (requires Ollama)"),
     no_embed: bool = typer.Option(False, "--no-embed", help="Skip vector embeddings"),
     no_sync: bool = typer.Option(False, "--no-sync", help="Skip auto-sync to cloud after scan"),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt"),
     model: str | None = typer.Option(None, "--model", "-m", help="Ollama model name"),
 ) -> None:
     """Scan repositories, analyze, summarize, and index — all in one step."""
@@ -71,6 +72,24 @@ def scan(
     if not repos:
         console.print("[yellow]No repositories found.[/yellow]")
         raise typer.Exit(0)
+
+    # Preview: show discovered repos and ask for confirmation
+    if not yes:
+        preview_table = Table(title=f"Found {len(repos)} repositories")
+        preview_table.add_column("#", style="dim", justify="right")
+        preview_table.add_column("Repository", style="cyan")
+        preview_table.add_column("Path", style="dim")
+
+        for i, repo_path in enumerate(sorted(repos, key=lambda p: p.name.lower()), 1):
+            rel = repo_path.relative_to(root) if repo_path != root else Path(repo_path.name)
+            preview_table.add_row(str(i), repo_path.name, str(rel))
+
+        console.print(preview_table)
+
+        step_desc = " → ".join(steps)
+        if not typer.confirm(f"\nProceed with scan ({step_desc})?", default=True):
+            console.print("[dim]Aborted.[/dim]")
+            raise typer.Exit(0)
 
     results: list[Project] = []
     new_or_changed: list[Project] = []
@@ -948,7 +967,7 @@ def plugin_search(
 
     try:
         resp = httpx.get(
-            f"{api_url}/api/plugins",
+            f"{api_url}/plugins",
             params={"q": query},
             headers={"Authorization": f"Bearer {token}"},
             timeout=15,
@@ -1003,7 +1022,7 @@ def plugin_install(
     console.print(f"[dim]Requesting plugin '{name}' from marketplace...[/dim]")
     try:
         resp = httpx.post(
-            f"{api_url}/api/plugins/{name}/install",
+            f"{api_url}/plugins/{name}/install",
             headers={"Authorization": f"Bearer {token}"},
             timeout=15,
         )
@@ -1150,7 +1169,7 @@ def plugin_publish() -> None:
     # Upload: multipart with metadata JSON + tarball
     try:
         resp = httpx.post(
-            f"{api_url}/api/plugins",
+            f"{api_url}/plugins",
             headers={"Authorization": f"Bearer {token}"},
             files={
                 "metadata": ("plugin.json", json.dumps(manifest).encode(), "application/json"),

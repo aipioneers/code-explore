@@ -1,7 +1,6 @@
 """Scan local directories to discover git repositories."""
 
 import asyncio
-import os
 from pathlib import Path
 
 from rich.console import Console
@@ -26,7 +25,12 @@ async def scan_local_repos(
     root: str | Path,
     max_depth: int = 4,
 ) -> list[Path]:
-    """Walk root directory recursively and return paths of discovered git repositories."""
+    """Walk root directory recursively and return paths of discovered git repositories.
+
+    Unlike a naive approach, this continues descending into subdirectories even
+    after finding a .git directory, so nested repos (submodules, monorepo
+    children) are discovered as independent projects.
+    """
     root = Path(root).expanduser().resolve()
     if not root.is_dir():
         console.print(f"[red]Root path does not exist: {root}[/red]")
@@ -45,9 +49,9 @@ def _walk_for_repos(root: Path, max_depth: int) -> list[Path]:
     while stack:
         current, depth = stack.pop()
 
-        if (current / ".git").is_dir():
+        is_repo = (current / ".git").is_dir()
+        if is_repo:
             repos.append(current)
-            continue
 
         if depth >= max_depth:
             continue
